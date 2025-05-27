@@ -1,0 +1,5 @@
+display:
+  - get_path
+  - print_summary
+on_error:
+  - handle_exception
