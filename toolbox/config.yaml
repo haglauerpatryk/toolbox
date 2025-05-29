@@ -1,5 +1,8 @@
 display:
-  - get_path
-  - print_summary
+  - track_time
+  - track_info
 on_error:
-  - handle_exception
+  - handle_problem
+log_output:
+  terminal: true
+  file: true

@@ -1,7 +1,9 @@
 from toolbox.core import light_toolbox
+import time
 
 @light_toolbox
 def do_something(name):
+    time.sleep(0.2)
     print(f"Doing something with {name}")
     return f"Processed {name}"
 
