@@ -1,8 +1,19 @@
-display:
-  - track_time
-  - track_info
-on_error:
-  - handle_problem
-log_output:
-  terminal: true
-  file: true
+toolbox:
+  display:
+    always:
+      - track_info
+    if_var:
+      DEBUG:
+        - track_time
+
+  on_error:
+    always:
+      - handle_problem
+
+  log_output:
+    if_var:
+      DEBUG:
+        - terminal
+    if_not_var:
+      DEBUG:
+        - file

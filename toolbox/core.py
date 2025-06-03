@@ -3,27 +3,56 @@ import yaml
 import inspect
 import functools
 from pathlib import Path
-from toolbox.hooks import HookMethods, _hook_registry
+from toolbox.hooks import HookMethods, _feature_hook_registry
 from toolbox.logger import init_log_buffer, flush_logs_block
+from toolbox.logic import LogicResolver
+from toolbox.log_dispatcher import LogDispatcher
 
 class ToolBox(HookMethods):
+    name = "toolbox"
     log_directory = "logs"
     log_filename = "toolbox.log"
     root_dir = Path(__file__).resolve().parent.parent
 
-    def __init__(self, config):
-        self.config = config
+    variables = {
+        "DEBUG": 1
+    }
+
+    def __init__(self, global_config):
+        section = global_config.get(self.name, {})
+        self.config = section
+
         self.hooks = {
             "before": [],
             "after": [],
             "on_error": []
         }
 
-        log_cfg = config.get("log_output", {})
-        self.log_to_terminal = log_cfg.get("terminal", False)
-        self.log_to_file = log_cfg.get("file", False)
+        resolver = LogicResolver(self.variables)
 
-        self._load_hooks()
+        # --- Load display, on_error hooks
+        for hook_type in ("display", "on_error"):
+            logic_block = section.get(hook_type, {})
+            hook_names = resolver.resolve_logic_block(logic_block)
+
+            for name, entries in _feature_hook_registry.items():
+                if name in hook_names:
+                    for entry in entries:
+                        if entry["stage"] == hook_type or (hook_type == "display" and entry["stage"] in ("before", "after")):
+                            func = getattr(self, entry["func"].__name__)
+                            self.hooks[entry["stage"]].append(func)
+
+        self.log_dispatcher = None
+
+        logic_block = section.get("log_output", {})
+        resolver = LogicResolver(self.variables)
+        log_outputs = resolver.resolve_logic_block(logic_block)
+
+        self.log_dispatcher = LogDispatcher(
+            enabled_outputs=log_outputs,
+            file_path=self._get_log_file_path(),
+            root_dir=self.root_dir
+        )
 
     def _get_log_file_path(self):
         return f"{self.log_directory}/{self.log_filename}"
@@ -35,7 +64,7 @@ class ToolBox(HookMethods):
                 continue
             selected_hooks.update(features)
 
-        for name, entries in _hook_registry.items():
+        for name, entries in _feature_hook_registry.items():
             if name in selected_hooks:
                 for entry in entries:
                     stage = entry["stage"]
@@ -61,24 +90,19 @@ class ToolBox(HookMethods):
                     method(e, context=context)
                 raise
             finally:
-                flush_logs_block(
-                    func,
-                    to_terminal=self.log_to_terminal,
-                    to_file=self.log_to_file,
-                    file_path=self._get_log_file_path(),
-                    root_dir=self.root_dir
-                )
+                if self.log_dispatcher:
+                    self.log_dispatcher.dispatch(func)
 
         return wrapper
 
 
 
-# Load config once
 def _load_config(config_path="toolbox/config.yaml"):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
 
-_TOOLBOX_INSTANCE = ToolBox(config=_load_config())
+_global_config = _load_config()
+_TOOLBOX_INSTANCE = ToolBox(global_config=_global_config)
 
 def light_toolbox(func):
     return _TOOLBOX_INSTANCE.wrap(func)
