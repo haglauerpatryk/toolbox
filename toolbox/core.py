@@ -97,12 +97,6 @@ class ToolBox(HookMethods):
 
 
 
-def _load_config(config_path="toolbox/config.yaml"):
+def load_yaml_config(config_path):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
-
-_global_config = _load_config()
-_TOOLBOX_INSTANCE = ToolBox(global_config=_global_config)
-
-def light_toolbox(func):
-    return _TOOLBOX_INSTANCE.wrap(func)

@@ -1,4 +1,4 @@
-toolbox:
+my_toolbox:
   display:
     always:
       - track_info
