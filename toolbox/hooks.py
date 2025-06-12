@@ -33,6 +33,10 @@ class HookMethods:
     def print_summary(self, result, context=None):
         log(f"[AFTER] Result summary: {result}, path was: {context.get('path')}")
 
+    @feature_hook(name="banana", stage="before")
+    def print_banana(self, *args, context=None, **kwargs):
+        log(f"[AFTER] BANANA!")
+
     @feature_hook(name="handle_problem", stage="on_error")
     def handle_exception(self, e, context=None):
         log(f"[ERROR] Caught: {e}")

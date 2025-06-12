@@ -21,3 +21,8 @@ my_toolbox:
     if_not_var:
       DEBUG:
         - file
+
+error_toolbox:
+  display:
+    always:
+      - banana

@@ -5,10 +5,15 @@ class MyToolbox(ToolBox):
     config_path = "toolbox/config.yaml"
 
     def __init__(self):
-        global_config = load_yaml_config(self.config_path)
-        super().__init__(global_config=global_config)
+        super().__init__(config_path=self.config_path)
+
 
 my_toolbox_instance = MyToolbox()
 
+class ErrorToolbox(MyToolbox):
+    name = "error_toolbox"
+
+error_toolbox_instance = ErrorToolbox()
+
 def light_toolbox(func):
-    return my_toolbox_instance.wrap(func)
+    return error_toolbox_instance.wrap(func)
