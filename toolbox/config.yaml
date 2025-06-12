@@ -6,6 +6,10 @@ my_toolbox:
       DEBUG:
         - track_time
 
+  decorators:
+    always:
+      - retry
+
   on_error:
     always:
       - handle_problem

@@ -7,6 +7,7 @@ from toolbox.hooks import HookMethods, _feature_hook_registry
 from toolbox.logger import init_log_buffer, flush_logs_block
 from toolbox.logic import LogicResolver
 from toolbox.log_dispatcher import LogDispatcher
+from toolbox.decorators import _decorator_registry
 
 class ToolBox(HookMethods):
     name = "toolbox"
@@ -54,6 +55,14 @@ class ToolBox(HookMethods):
             root_dir=self.root_dir
         )
 
+        self.middle_decorators = []
+        decorator_block = section.get("decorators", {})
+        decorator_names = resolver.resolve_logic_block(decorator_block)
+
+        for name in decorator_names:
+            if name in _decorator_registry:
+                self.middle_decorators.append(_decorator_registry[name])
+
     def _get_log_file_path(self):
         return f"{self.log_directory}/{self.log_filename}"
 
@@ -73,7 +82,7 @@ class ToolBox(HookMethods):
 
     def wrap(self, func):
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapped(*args, **kwargs):
             context = {}
             init_log_buffer()
 
@@ -81,7 +90,12 @@ class ToolBox(HookMethods):
                 method(*args, context=context, **kwargs)
 
             try:
-                result = func(*args, **kwargs)
+                decorated_func = func
+                for decorator in reversed(self.middle_decorators):
+                    decorated_func = decorator(decorated_func)
+
+                result = decorated_func(*args, **kwargs)
+
                 for method in self.hooks['after']:
                     method(result, context=context)
                 return result
@@ -93,7 +107,7 @@ class ToolBox(HookMethods):
                 if self.log_dispatcher:
                     self.log_dispatcher.dispatch(func)
 
-        return wrapper
+        return wrapped
 
 
 
