@@ -1,8 +1,17 @@
-from toolbox.core import ToolBox, load_yaml_config
+"""
+Ponizej widac podstawowy 'setup' dla tego narzedzia w Pythonie. Jak widac, posiada wsparcie dla dziedziczenia
+oraz dodawania wlasnych zmiennych konfiguracyjnych.
+"""
+
+from toolbox.core import ToolBox
 
 class MyToolbox(ToolBox):
-    name = "my_toolbox"
-    config_path = "toolbox/config.yaml"
+    name = "my_toolbox" # nazwa dla .yaml
+    config_path = "config.yaml"
+
+    variables = {
+        "DEBUG": 1
+    }
 
     def __init__(self):
         super().__init__(config_path=self.config_path)

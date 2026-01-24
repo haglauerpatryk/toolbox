@@ -1,3 +1,8 @@
+"""
+Tutaj znajduje sie podstawowy logger do buforowania i flushowania logow oraz ich proste formatowanie.
+"""
+
+
 import threading
 import inspect
 import os

@@ -1,10 +1,27 @@
+"""
+Tutaj znajduje się główna klasa ToolBox oraz funkcje pomocnicze do ładowania konfiguracji YAML i rozwiązywania konfiguracji.
+
+Jezeli chodzi o strukture, to mamy pare miejsc gdzie bazowo sa podpinane haki:
+1. Przez hooks.py:
+- before,
+- after,
+- on_error,
+2. Przez decorators.py:
+- decorators,
+3. Przez log_dispatcher.py:
+- log_output.
+4. Z oddzielnej kategorii, bo z logiki, ale:
+- logic.py
+"""
+
+
 import os
 import yaml
 import inspect
 import functools
 from pathlib import Path
 from toolbox.hooks import HookMethods, _feature_hook_registry
-from toolbox.logger import init_log_buffer, flush_logs_block
+from toolbox.logger import init_log_buffer
 from toolbox.logic import LogicResolver
 from toolbox.log_dispatcher import LogDispatcher
 from toolbox.decorators import _decorator_registry
@@ -57,7 +74,6 @@ class ToolBox(HookMethods):
     root_dir = Path(__file__).resolve().parent.parent
 
     variables = {
-        "DEBUG": 1
     }
 
     def __init__(self, config_path="toolbox/config.yaml"):

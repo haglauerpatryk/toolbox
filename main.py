@@ -1,3 +1,7 @@
+"""
+Ponizej sa przykladowe testy dla dekoratora light_toolbox.
+"""
+
 from my_toolbox import light_toolbox
 import time
 import random
