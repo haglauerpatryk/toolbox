@@ -1,116 +1,137 @@
-# Projekt – Logger oparty o hooki i dekoratory
+# toolbox
 
-## Wprowadzenie
+A small, config-driven **function-wrapping architecture**. The core ships with *no*
+behavior of its own — you decorate a function, and a YAML file declaratively decides
+what runs around each call (instrumentation, logging, retries, error handling).
 
-Witam w moim projekcie.
+The behaviors themselves ("lego pieces") live **outside** the core. You install a
+bundle, write your own, or both.
 
-Główną funkcjonalnością projektu jest **logger**. Struktura została jednak zaprojektowana w taki sposób, aby była możliwie prosta w rozbudowie — modularna, składana z elementów, które można łączyć podobnie jak klocki. Celowo unikałem używania tego określenia wprost, ponieważ mimo że projekt ten umożliwia zbudowanie loggera, nie jest to jedyna możliwość wykorzystania tego narzędzia. Taka jednak filozofia przyświecała projektowi od samego początku.
+## Concepts
 
-Poniżej, oprócz ogólnego opisu, zawarłem również **zastosowania oraz konteksty użycia**, wynikające z moich realnych potrzeb. Nie pochylałem się tutaj nad dokładnym opisem uruchamiania i obsługi narzędzia krok po kroku, ponieważ **zostało to przekazane wcześniej w konwersacji wraz z załączonymi grafikami**, pokazującymi:
-- proces uruchamiania projektu,
-- przykładowy output,
-- miejsca umożliwiające manipulację poszczególnymi elementami.
+Two layers, kept strictly separate:
 
----
+- **Core (`toolbox/`)** — the architecture. Installable on its own and does nothing
+  until a piece registers. Provides the `ToolBox` engine, the YAML/config machinery,
+  the `CallContext`, and the four registries pieces plug into.
+- **Pieces (features)** — the lego bricks. Each is a small function registered under a
+  name with one of four decorators. They live in feature bundles (e.g.
+  `examples/toolbox_basic/`) or in your own project.
 
-## Setup (Linux)
+### The four kinds
 
-Do uruchomienia projektu powinien wystarczyć poniższy setup:
+Every extension point uses the **same** convention: `@<kind>.register("<name>")`, where
+`<name>` is the exact string you reference in `config.yaml`.
+
+| Kind | Decorator | Signature | What it is |
+|------|-----------|-----------|------------|
+| hook | `@hook.register("n", stages=("before","after","on_error"))` | `(ctx)` | observer that runs at lifecycle points |
+| wrapper | `@wrapper.register("n")` | `(func) -> func` | middleware that wraps the call (can alter control flow) |
+| sink | `@sink.register("n")` | `(ctx)` | where buffered output goes |
+| rule | `@rule.register("n")` | `(variables, payload) -> [names]` | a config selector (the core ships `always`/`if_var`/`if_not_var`) |
+
+Hooks and sinks receive a single **`CallContext`** carrying everything about the call:
+`func`, `args`, `kwargs`, `stage`, `result`, `exception`, a `scratch` dict for passing
+state between stages, a per-call `buffer`, and `toolbox` (the owning instance). Wrappers
+run *inside* the call and log via the module-level `log()`, which finds the current
+context automatically.
+
+## Setup
 
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .            # installs the core
+pip install -r requirements.txt   # demo deps (PyYAML, tenacity)
 python3 main.py
 ```
 
-## Podstawowe pliki użytkowe
+## The three user-facing files
 
-Całość użytkowania narzędzia opiera się na trzech głównych plikach:
+- **`my_toolbox.py`** — define your toolbox: subclass `ToolBox`, give it a `name`
+  (its YAML section), declare `variables` (e.g. `DEBUG`), and list `features`.
+- **`config.yaml`** — declare which pieces are active and under what conditions.
+- **`main.py`** — your code; decorate functions with the toolbox.
 
-- **`my_toolbox.py`**  
-  Plik odpowiedzialny za konfigurację narzędzia.
+## Writing a piece
 
-- **`config.yaml`**  
-  Plik konfiguracyjny, w którym definiujemy, które elementy mają być aktywne, a które nie.
+```python
+from toolbox import hook, CallContext
 
-- **`main.py`**  
-  Plik, w którym narzędzie jest wykorzystywane — zawiera również załączone testy.
+@hook.register("track_time", stages=("before", "after"))
+def track_time(ctx: CallContext):
+    if ctx.stage == "before":
+        ctx.scratch["start"] = perf_counter()
+    else:
+        ctx.log(f"RUNTIME: {perf_counter() - ctx.scratch['start']:.3f}s")
+```
 
----
+Importing the module that contains this is all it takes to register it. Names are
+unique per kind — a duplicate name raises immediately rather than silently overriding.
 
-## Rozszerzalność i własne funkcjonalności
+## Config grammar
 
-Dodawanie własnych funkcjonalności jest — zgodnie z opisem przekazanym wcześniej — **proste i bezpośrednie**. Projekt został zaprojektowany w taki sposób, aby nowe elementy można było wprowadzać bez ingerowania w istniejącą logikę aplikacji.
+Each section maps 1:1 to a kind (`hooks`, `wrappers`, `sinks`). Inside a section, the
+selector rules decide what is active:
 
----
+```yaml
+my_toolbox:
+  hooks:
+    always:
+      - track_info
+    if_var:
+      DEBUG:
+        - track_time
+  wrappers:
+    always:
+      - retry
+  sinks:
+    if_var:
+      DEBUG: [terminal]
+    if_not_var:
+      DEBUG: [file]
+```
 
-## Opis struktury plików
+Toolboxes inherit config through the class hierarchy: a subclass's YAML section is
+deep-merged over its parents' (lists extend, dicts merge).
 
-- **`core.py`**  
-  Główna pętla wykonująca iterację po wszystkich zarejestrowanych hakach.
+## How pieces are discovered
 
-- **`decorators.py`**  
-  Definicje dekoratorów.
+Three channels, checked at startup:
 
-- **`hooks.py`**  
-  Definicje haków.
+1. **Auto prefix-scan (zero-config).** Any installed top-level package named
+   `toolbox_*` is imported automatically. This is the `pip install` path — install a
+   bundle and it self-registers, no configuration:
+   ```bash
+   pip install toolbox-basic   # provides the `toolbox_basic` package → picked up
+   ```
+2. **`features` list.** On your toolbox, list module names, a `.py` file, or a
+   directory to collect pieces from:
+   ```python
+   class MyToolbox(ToolBox):
+       features = ["examples.toolbox_basic", "myproject/pieces/"]
+   ```
+3. **Manual import.** Importing any module that registers pieces works on its own.
 
-- **`log_dispatcher.py`**  
-  Odpowiedzialny za definiowanie miejsc zapisu informacji (np. gdzie trafiają logi).
+Set `auto_discover = False` on your toolbox to opt out of the prefix-scan.
 
-- **`logic.py`**  
-  Miejsce na dodawanie logiki.
+## File layout
 
----
+```
+toolbox/                 core — architecture only
+  registry.py            the one Registry primitive
+  registries.py          the four kind instances (hook/wrapper/sink/rule)
+  context.py             CallContext + current-context logging
+  selectors.py           always / if_var / if_not_var
+  core.py                ToolBox: config load, MRO merge, wrap() pipeline
+  discovery.py           prefix-scan + features-list loading
+examples/toolbox_basic/  reference bundle (track_time, track_info, retry, sinks, errors)
+config.yaml  my_toolbox.py  main.py   demo wiring
+```
 
-## Uwagi dotyczące stanu projektu
+## Roadmap
 
-Mam świadomość, że projekt oferuje duże pole do refaktoryzacji. Na obecnym etapie **świadomie się tego nie podejmuję**, ponieważ priorytetem jest dla mnie:
-- zapewnienie wsparcia dla ASGI/WSGI,
-- możliwość wysyłania logów asynchronicznie,
-- implementacja kilku dodatkowych funkcjonalności, które są dla mnie kluczowe funkcjonalnie.
-Jednak mimo to uznałem, że jest wystarczająco interesujący, by go pokazać.
----
-
-## Przykładowe konteksty użycia
-
-Poniższe scenariusze wynikają z moich faktycznych potrzeb i doświadczeń:
-
-1. **Klasyczne użycie jako logger**  
-   Możliwość tworzenia struktur, różnych konfiguracji w pliku `yaml` oraz logiki w jednym miejscu, a następnie prostego „doklejenia” odpowiedniego dekoratora do funkcji — bez konieczności głębszego zastanawiania się nad implementacją. Ani bez nadmiernej ingerencji w kod.
-
-2. **Usprawnienie pracy deweloperskiej**  
-   Narzędzie pozwala bez ingerowania w główną logikę aplikacji dodać w pliku `yaml` fragmenty działające wyłącznie wtedy, gdy na przykład: `DEBUG == True`.
-   Nie wpływa to na środowisko produkcyjne, a deweloperowi umożliwia m.in.:
-   - wypisywanie nazw wywoływanych funkcji,
-   - śledzenie czasu wykonania,
-   - sprawdzanie poprawności typów wartości, 
-   - itp. 
-   bez dodawania `print()` ani podobnych instrukcji wewnątrz funkcji.
-
-3. **Ad hoc dekorator do wychwytywania błędów**  
-   Potrzeba ta pojawiła się u mnie szczególnie przy pracy z LLM-ami.  
-   Są to narzędzia bardzo użyteczne (symulowanie funkcjonalności, NLP, itp.), jednak jednocześnie niestabilne. Zdarza się, że kod przestaje działać z niewiadomego powodu, co wymusza dodawanie dodatkowego kodu diagnostycznego.  
-   To narzędzie pozwala:
-   - zbierać maksymalną ilość informacji podczas wywołania funkcji,
-   - **wysyłać logi wyłącznie w przypadku wystąpienia błędu**.
-
----
-
-## Kierunki dalszego rozwoju
-
-Aktualnie pracuję nad następującymi kierunkami rozwoju projektu:
-
-1. **Zastąpienie klasycznego `try/except` dekoratorem**  
-   Na pierwszy rzut oka może to brzmieć niedorzecznie, jednak potrzeba ta pojawiła się u mnie poraz pierwszy w kontekście systemów płatności.  
-   Poza obsługą szczęśliwych ścieżek, należy tam uwzględniać bardzo długą listę potencjalnych błędów, jakie mogą mieć miejsce. W efekcie:
-   - proste funkcje (kilkanaście linii) rozrastają się do kilkudziesięciu,
-   - kod staje się „zabetonowany” i trudny w dalszej rozbudowie.  
-
-   Moim celem jest podejście, w którym wnętrze funkcji odpowiada wyłącznie na pytanie:  
-   **„Co ta funkcja ma zrobić?”**
-   Oraz trzymać się zasady, według której każda funkcja wykonuje jedną rzecz.
-
-2. **Wsparcie dla ASGI/WSGI oraz programowania asynchronicznego**  
-   Jest to bezpośrednia kontynuacja założeń architektonicznych projektu.
+- Split `examples/toolbox_basic/` into its own installable distribution (`toolbox-basic`).
+- A wrapper that replaces hand-written `try/except` chains.
+- ASGI/WSGI support and async pieces (the `CallContext` is already `contextvars`-based,
+  so it carries correctly across `await`).

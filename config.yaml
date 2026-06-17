@@ -1,20 +1,14 @@
 my_toolbox:
-  display:
+  hooks:
     always:
       - track_info
     if_var:
       DEBUG:
         - track_time
-
-  decorators:
+  wrappers:
     always:
       - retry
-
-  on_error:
-    always:
-      - handle_problem
-
-  log_output:
+  sinks:
     if_var:
       DEBUG:
         - terminal
@@ -23,6 +17,6 @@ my_toolbox:
         - file
 
 error_toolbox:
-  display:
+  hooks:
     always:
-      - banana
+      - handle_problem

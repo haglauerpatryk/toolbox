@@ -1,173 +1,122 @@
-"""
-Tutaj znajduje się główna klasa ToolBox oraz funkcje pomocnicze do ładowania konfiguracji YAML i rozwiązywania konfiguracji.
-
-Jezeli chodzi o strukture, to mamy pare miejsc gdzie bazowo sa podpinane haki:
-1. Przez hooks.py:
-- before,
-- after,
-- on_error,
-2. Przez decorators.py:
-- decorators,
-3. Przez log_dispatcher.py:
-- log_output.
-4. Z oddzielnej kategorii, bo z logiki, ale:
-- logic.py
-"""
-
-
-import os
-import yaml
-import inspect
 import functools
-from pathlib import Path
-from toolbox.hooks import HookMethods, _feature_hook_registry
-from toolbox.logger import init_log_buffer
-from toolbox.logic import LogicResolver
-from toolbox.log_dispatcher import LogDispatcher
-from toolbox.decorators import _decorator_registry
-
-
 from copy import deepcopy
+from pathlib import Path
 
-_yaml_cache = None
+import yaml
 
-def load_yaml_config(path="toolbox/config.yaml"):
-    global _yaml_cache
-    if _yaml_cache is None:
-        with open(path, 'r') as f:
-            _yaml_cache = yaml.safe_load(f)
-    return _yaml_cache or {}
+from toolbox.context import CallContext, _current
+from toolbox.discovery import discover
+from toolbox.registries import hook, sink, wrapper
+from toolbox.selectors import Selector
+
+_yaml_cache = {}
+
+
+def load_yaml_config(path):
+    if path not in _yaml_cache:
+        with open(path, "r") as f:
+            _yaml_cache[path] = yaml.safe_load(f) or {}
+    return _yaml_cache[path]
+
+
+def deep_merge_dicts(a, b):
+    result = deepcopy(a)
+    for k, v in b.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = deep_merge_dicts(result[k], v)
+        elif k in result and isinstance(result[k], list) and isinstance(v, list):
+            result[k] = result[k] + deepcopy(v)
+        else:
+            result[k] = deepcopy(v)
+    return result
+
 
 def resolve_toolbox_config(cls, config_data):
     merged = {}
-
     for base in reversed(cls.__mro__):
         if not issubclass(base, ToolBox) or base is ToolBox:
             continue
         section_name = getattr(base, "name", None)
         if not section_name:
             continue
-        section = config_data.get(section_name, {})
-        merged = deep_merge_dicts(merged, section)
-
+        merged = deep_merge_dicts(merged, config_data.get(section_name, {}))
     return merged
 
-def deep_merge_dicts(a, b):
-    result = deepcopy(a)
-    for k, v in b.items():
-        if k in result:
-            if isinstance(result[k], dict) and isinstance(v, dict):
-                result[k] = deep_merge_dicts(result[k], v)
-            elif isinstance(result[k], list) and isinstance(v, list):
-                result[k].extend(v)
-            else:
-                result[k] = deepcopy(v)
-        else:
-            result[k] = deepcopy(v)
-    return result
 
-
-class ToolBox(HookMethods):
+class ToolBox:
     name = "toolbox"
+    config_path = "config.yaml"
     log_directory = "logs"
     log_filename = "toolbox.log"
     root_dir = Path(__file__).resolve().parent.parent
+    variables = {}
+    features = []
+    auto_discover = True
 
-    variables = {
-    }
+    def __init__(self):
+        discover(self.features, auto=self.auto_discover)
 
-    def __init__(self, config_path="toolbox/config.yaml"):
-        config_data = load_yaml_config(config_path)
-        self.config = resolve_toolbox_config(self.__class__, config_data)
+        config_data = load_yaml_config(self.config_path)
+        section = resolve_toolbox_config(type(self), config_data)
+        selector = Selector(self.variables)
 
-        self.hooks = {
-            "before": [],
-            "after": [],
-            "on_error": []
-        }
+        self.hooks = {"before": [], "after": [], "on_error": []}
+        for name in selector.resolve(section.get("hooks", {})):
+            entry = hook.get(name)
+            for stage in entry.meta.get("stages", ()):
+                self.hooks[stage].append(entry.func)
 
-        resolver = LogicResolver(self.variables)
+        self.wrappers = [wrapper.get(n).func for n in selector.resolve(section.get("wrappers", {}))]
+        self.sinks = [sink.get(n).func for n in selector.resolve(section.get("sinks", {}))]
 
-        # --- Load display, on_error hooks
-        for hook_type in ("display", "on_error"):
-            logic_block = self.config.get(hook_type, {})
-            hook_names = resolver.resolve_logic_block(logic_block)
-
-            for name, entries in _feature_hook_registry.items():
-                if name in hook_names:
-                    for entry in entries:
-                        if entry["stage"] == hook_type or (hook_type == "display" and entry["stage"] in ("before", "after")):
-                            func = getattr(self, entry["func"].__name__)
-                            self.hooks[entry["stage"]].append(func)
-
-        self.log_dispatcher = None
-
-        logic_block = self.config.get("log_output", {})
-        resolver = LogicResolver(self.variables)
-        log_outputs = resolver.resolve_logic_block(logic_block)
-
-        self.log_dispatcher = LogDispatcher(
-            enabled_outputs=log_outputs,
-            file_path=self._get_log_file_path(),
-            root_dir=self.root_dir
-        )
-
-        self.middle_decorators = []
-        decorator_block = self.config.get("decorators", {})
-        decorator_names = resolver.resolve_logic_block(decorator_block)
-
-        for name in decorator_names:
-            if name in _decorator_registry:
-                self.middle_decorators.append(_decorator_registry[name])
-
-    def _get_log_file_path(self):
+    @property
+    def log_path(self):
         return f"{self.log_directory}/{self.log_filename}"
 
-    def _load_hooks(self):
-        selected_hooks = set()
-        for label, features in self.config.items():
-            if label == "log_output":
-                continue
-            selected_hooks.update(features)
-
-        for name, entries in _feature_hook_registry.items():
-            if name in selected_hooks:
-                for entry in entries:
-                    stage = entry["stage"]
-                    func = getattr(self, entry["func"].__name__)
-                    self.hooks[stage].append(func)
+    @property
+    def _active(self):
+        return bool(
+            self.hooks["before"]
+            or self.hooks["after"]
+            or self.hooks["on_error"]
+            or self.wrappers
+            or self.sinks
+        )
 
     def wrap(self, func):
+        if not self._active:
+            return func
+
         @functools.wraps(func)
         def wrapped(*args, **kwargs):
-            context = {}
-            init_log_buffer()
-
-            for method in self.hooks['before']:
-                method(*args, context=context, **kwargs)
-
+            ctx = CallContext(func=func, args=args, kwargs=kwargs, toolbox=self)
+            token = _current.set(ctx)
             try:
-                decorated_func = func
-                for decorator in reversed(self.middle_decorators):
-                    decorated_func = decorator(decorated_func)
+                ctx.stage = "before"
+                for method in self.hooks["before"]:
+                    method(ctx)
 
-                result = decorated_func(*args, **kwargs)
+                inner = func
+                for w in reversed(self.wrappers):
+                    inner = w(inner)
 
-                for method in self.hooks['after']:
-                    method(result, context=context)
-                return result
-            except Exception as e:
-                for method in self.hooks['on_error']:
-                    method(e, context=context)
-                raise
+                try:
+                    ctx.result = inner(*args, **kwargs)
+                    ctx.stage = "after"
+                    for method in self.hooks["after"]:
+                        method(ctx)
+                    return ctx.result
+                except Exception as e:
+                    ctx.exception = e
+                    ctx.stage = "on_error"
+                    for method in self.hooks["on_error"]:
+                        method(ctx)
+                    raise
             finally:
-                if self.log_dispatcher:
-                    self.log_dispatcher.dispatch(func)
+                for emit in self.sinks:
+                    emit(ctx)
+                _current.reset(token)
 
         return wrapped
 
-
-
-def load_yaml_config(config_path):
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+    __call__ = wrap

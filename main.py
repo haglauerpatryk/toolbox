@@ -1,31 +1,32 @@
-"""
-Ponizej sa przykladowe testy dla dekoratora light_toolbox.
-"""
-
-from my_toolbox import light_toolbox
-import time
 import random
+import time
 
-@light_toolbox
+from my_toolbox import error_toolbox
+
+
+@error_toolbox
 def do_something(name):
     time.sleep(0.2)
     print(f"Doing something with {name}")
     return f"Processed {name}"
 
-@light_toolbox
+
+@error_toolbox
 def do_failing_task():
     raise ValueError("Oops!")
 
-@light_toolbox
+
+@error_toolbox
 def unreliable_api_call():
     print("Calling unreliable API...")
-    if random.random() < 0.7:  # 70% chance to fail
+    if random.random() < 0.7:
         raise TimeoutError("API did not respond")
     return "API Success!"
 
+
 if __name__ == "__main__":
     do_something("test-file.txt")
-    
+
     try:
         do_failing_task()
     except Exception as e:
