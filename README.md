@@ -160,6 +160,28 @@ unmatched exception propagates untouched. Tuple keys group types
 handler obeys the same return rule as a plain `on_error` — `catch` only *selects*, it
 doesn't change the contract.
 
+## Off-path sinks
+
+Sinks run inline in the wrap pipeline, so a sink doing slow I/O (a file write, a network
+send) adds latency to the call it's attached to. To move that work off the request path,
+wrap any sink with `background` — it hands the work to a shared daemon worker and returns
+immediately:
+
+```python
+from examples.toolbox_basic import background
+from examples.toolbox_basic.sinks import file
+
+sink.register("file_background")(background(file))   # the bundle already registers this one
+```
+
+Then wire `file_background` instead of `file` in config. The engine is unchanged and stays
+synchronous — only the chosen sink runs off-path; the caller pays just the enqueue cost.
+The worker uses a **bounded queue** (drops under sustained overload rather than growing
+memory or blocking the caller), flushes on interpreter exit, and swallows send failures to
+stderr so an off-path failure never surfaces on the request path. The snapshot handed to
+the worker is the call's `CallContext`; background sinks must not rely on
+`current_context()`, which doesn't cross the thread boundary.
+
 ## How pieces are discovered
 
 Three channels, checked at startup:
@@ -190,7 +212,7 @@ toolbox/                 core — architecture only
   selectors.py           always / if_var / if_not_var
   core.py                ToolBox: config load, MRO merge, wrap() pipeline
   discovery.py           prefix-scan + features-list loading
-examples/toolbox_basic/  reference bundle (track_time, track_info, retry, sinks, errors)
+examples/toolbox_basic/  reference bundle (instrument, retry, sinks, errors, catch, background)
 config.yaml  my_toolbox.py  main.py   demo wiring
 ```
 

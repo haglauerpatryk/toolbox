@@ -4,6 +4,8 @@ from pathlib import Path
 
 from toolbox import sink
 
+from .background import background
+
 
 @sink.register("terminal")
 def terminal(ctx):
@@ -19,6 +21,10 @@ def file(ctx):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "a") as fh:
         fh.write(_render(ctx) + "\n")
+
+
+# same file sink, run off the request path by a background worker
+sink.register("file_background")(background(file))
 
 
 def _render(ctx):
