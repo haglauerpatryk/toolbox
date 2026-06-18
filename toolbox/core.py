@@ -83,8 +83,8 @@ class ToolBox:
             or self.sinks
         )
 
-    def wrap(self, func):
-        if not self._active:
+    def wrap(self, func, on_error=None):
+        if not self._active and on_error is None:
             return func
 
         @functools.wraps(func)
@@ -111,7 +111,15 @@ class ToolBox:
                     ctx.stage = "on_error"
                     for method in self.hooks["on_error"]:
                         method(ctx)
-                    raise
+                    if on_error is None:
+                        raise
+                    outcome = on_error(e)
+                    if isinstance(outcome, BaseException):
+                        if outcome is e:
+                            raise
+                        raise outcome from e
+                    ctx.result = outcome
+                    return ctx.result
             finally:
                 for emit in self.sinks:
                     emit(ctx)
@@ -119,4 +127,7 @@ class ToolBox:
 
         return wrapped
 
-    __call__ = wrap
+    def __call__(self, func=None, *, on_error=None):
+        if func is not None:
+            return self.wrap(func, on_error=on_error)
+        return lambda f: self.wrap(f, on_error=on_error)

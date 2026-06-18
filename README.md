@@ -95,6 +95,71 @@ my_toolbox:
 Toolboxes inherit config through the class hierarchy: a subclass's YAML section is
 deep-merged over its parents' (lists extend, dicts merge).
 
+## Error handling
+
+A toolbox instance is the decorator. Used bare, it applies the configured pieces:
+
+```python
+from my_toolbox import error_toolbox
+
+@error_toolbox
+def do_work(...):
+    ...
+```
+
+To replace a `try/except` with a one-liner, hand the decorator an `on_error` lambda.
+It is **not** a registered piece and lives nowhere in config — it is freeform code,
+bound to that one function, that the framework calls when the function raises. The
+contract is a single rule:
+
+> The lambda receives the exception `e`. **Return an exception instance → the framework
+> raises it. Return anything else (including `None`) → that value becomes the call's
+> result** (the error is swallowed and that's your fallback).
+
+That one rule covers the whole suite:
+
+```python
+@error_toolbox(on_error=lambda e: None)                     # swallow → fallback is None
+@error_toolbox(on_error=lambda e: {"ok": False})            # swallow with a fallback value
+@error_toolbox(on_error=lambda e: e)                        # re-raise the original (traceback kept)
+@error_toolbox(on_error=lambda e: ApiError(str(e)))         # translate (chained from the original)
+@error_toolbox(on_error=lambda e: None if isinstance(e, TimeoutError) else e)   # branch by type
+@error_toolbox(on_error=lambda e: handle(e))                # delegate arbitrary logic to a function
+```
+
+A lambda is a single expression, so it cannot contain a `raise` statement — returning
+the exception is how you raise from one. For anything beyond a one-liner, point the
+lambda at a normal function (`lambda e: handle(e)`); the same return rule applies to
+whatever that function hands back.
+
+Logging is unaffected: the configured `on_error` hooks and sinks still fire on every
+exception regardless of what the lambda decides. The lambda may read the call's
+`CallContext` via `current_context()`, but should never write per-function state into it.
+
+### Routing by exception type
+
+For per-type handling, `catch` (in the reference bundle) compiles a `{type: handler}`
+map into a single `on_error` lambda — the core still only ever sees one callable:
+
+```python
+from examples.toolbox_basic import catch
+
+@error_toolbox(on_error=catch({
+    ValueError: lambda e: "<bad input>",          # swallow with fallback
+    KeyError:   lambda e: e,                       # re-raise the original
+    Exception:  lambda e: AppError(str(e)),        # translate everything else
+}))
+def do_work(...):
+    ...
+```
+
+Matching walks the exception's MRO, so the **most specific type wins regardless of map
+order**; `Exception` is the catch-all (the last type every exception's MRO reaches); an
+unmatched exception propagates untouched. Tuple keys group types
+(`(ValueError, TypeError): handler`). Each
+handler obeys the same return rule as a plain `on_error` — `catch` only *selects*, it
+doesn't change the contract.
+
 ## How pieces are discovered
 
 Three channels, checked at startup:
@@ -132,6 +197,5 @@ config.yaml  my_toolbox.py  main.py   demo wiring
 ## Roadmap
 
 - Split `examples/toolbox_basic/` into its own installable distribution (`toolbox-basic`).
-- A wrapper that replaces hand-written `try/except` chains.
 - ASGI/WSGI support and async pieces (the `CallContext` is already `contextvars`-based,
   so it carries correctly across `await`).

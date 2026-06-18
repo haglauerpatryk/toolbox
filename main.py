@@ -1,6 +1,6 @@
-import random
 import time
 
+from examples.toolbox_basic import catch
 from my_toolbox import error_toolbox
 
 
@@ -11,29 +11,37 @@ def do_something(name):
     return f"Processed {name}"
 
 
-@error_toolbox
-def do_failing_task():
+# a single freeform lambda
+@error_toolbox(on_error=lambda e: f"<recovered from {type(e).__name__}>")
+def swallow_with_fallback():
     raise ValueError("Oops!")
 
 
-@error_toolbox
-def unreliable_api_call():
-    print("Calling unreliable API...")
-    if random.random() < 0.7:
-        raise TimeoutError("API did not respond")
-    return "API Success!"
+# routing by exception type — catch() resolves the map into one lambda
+@error_toolbox(on_error=catch({
+    ValueError: lambda e: "<bad input>",                     # swallow with fallback
+    KeyError:   lambda e: e,                                 # re-raise the original
+    Exception:  lambda e: RuntimeError(f"unexpected: {e}"),  # translate everything else
+}))
+def routed(fail_with):
+    raise fail_with
 
 
 if __name__ == "__main__":
-    do_something("test-file.txt")
+    print("do_something ->", do_something("test-file.txt"))
+    print("swallow_with_fallback ->", swallow_with_fallback())
+
+    print("routed(ValueError) ->", routed(ValueError("bad")))
 
     try:
-        do_failing_task()
+        routed(KeyError("missing"))
     except Exception as e:
-        print(f"Handled error from failing task: {e}")
+        print(f"routed(KeyError) propagated -> {type(e).__name__}: {e}")
 
     try:
-        result = unreliable_api_call()
-        print(f"Unreliable API result: {result}")
+        routed(ZeroDivisionError("/0"))
     except Exception as e:
-        print(f"API call ultimately failed: {e}")
+        print(
+            f"routed(ZeroDivisionError) propagated -> {type(e).__name__}: {e} "
+            f"(cause: {type(e.__cause__).__name__})"
+        )

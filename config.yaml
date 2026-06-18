@@ -5,9 +5,6 @@ my_toolbox:
     if_var:
       DEBUG:
         - track_time
-  wrappers:
-    always:
-      - retry
   sinks:
     if_var:
       DEBUG:
