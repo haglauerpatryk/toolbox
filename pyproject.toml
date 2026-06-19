@@ -11,5 +11,17 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+    "tenacity>=9",
+]
+
 [tool.setuptools]
 packages = ["toolbox"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: exercises real wall-clock timing (retry sleeps, background worker thread)",
+]
