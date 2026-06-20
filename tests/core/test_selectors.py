@@ -9,24 +9,24 @@ def test_always_returns_payload():
 
 
 def test_if_var_includes_on_truthy():
-    assert Selector({"DEBUG": 1}).resolve({"if_var": {"DEBUG": ["x"]}}) == ["x"]
+    assert Selector({"FLAG": 1}).resolve({"if_var": {"FLAG": ["x"]}}) == ["x"]
 
 
 def test_if_var_excludes_on_falsy():
-    assert Selector({"DEBUG": 0}).resolve({"if_var": {"DEBUG": ["x"]}}) == []
+    assert Selector({"FLAG": 0}).resolve({"if_var": {"FLAG": ["x"]}}) == []
 
 
 def test_if_var_excludes_when_var_absent():
-    assert Selector({}).resolve({"if_var": {"DEBUG": ["x"]}}) == []
+    assert Selector({}).resolve({"if_var": {"FLAG": ["x"]}}) == []
 
 
 def test_if_not_var_includes_on_falsy():
-    assert Selector({"DEBUG": 0}).resolve({"if_not_var": {"DEBUG": ["x"]}}) == ["x"]
-    assert Selector({}).resolve({"if_not_var": {"DEBUG": ["x"]}}) == ["x"]
+    assert Selector({"FLAG": 0}).resolve({"if_not_var": {"FLAG": ["x"]}}) == ["x"]
+    assert Selector({}).resolve({"if_not_var": {"FLAG": ["x"]}}) == ["x"]
 
 
 def test_if_not_var_excludes_on_truthy():
-    assert Selector({"DEBUG": 1}).resolve({"if_not_var": {"DEBUG": ["x"]}}) == []
+    assert Selector({"FLAG": 1}).resolve({"if_not_var": {"FLAG": ["x"]}}) == []
 
 
 def test_empty_block_and_none():

@@ -1,0 +1,6 @@
+# Second overlay; adds a metrics hook. Lists extend across sources, so this
+# appends to whatever the base and earlier overlays already declared.
+service:
+  hooks:
+    always:
+      - count_calls

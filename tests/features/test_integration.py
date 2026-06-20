@@ -1,14 +1,13 @@
-"""End-to-end tests against the real wiring: config.yaml + the toolbox_basic bundle."""
+"""End-to-end tests against the real wiring: config.py base + configs/ overlay + bundle."""
 
 import pytest
 
 import my_toolbox
 
 
-def test_error_toolbox_loads_handle_problem_from_real_config():
+def test_error_toolbox_loads_handle_problem_from_base():
     et = my_toolbox.error_toolbox
-    names = [fn.__name__ for fn in et.hooks["on_error"]]
-    assert "handle_problem" in names
+    assert "handle_problem" in [fn.__name__ for fn in et.hooks["on_error"]]
 
 
 def test_error_toolbox_swallows_with_lambda():
@@ -19,7 +18,7 @@ def test_error_toolbox_swallows_with_lambda():
     assert f() == "recovered"
 
 
-def test_error_toolbox_routes_by_type_with_catch(capsys):
+def test_error_toolbox_routes_by_type_with_catch():
     from examples.toolbox_basic import catch
 
     @my_toolbox.error_toolbox(
@@ -44,8 +43,15 @@ def test_error_toolbox_routes_by_type_with_catch(capsys):
     assert isinstance(info.value.__cause__, ZeroDivisionError)
 
 
-def test_my_toolbox_debug_pipeline_logs_via_terminal(capsys):
-    mt = my_toolbox.MyToolbox()  # DEBUG=1 -> track_info + track_time + terminal sink
+def test_base_plus_overlay_wires_pieces():
+    mt = my_toolbox.MyToolbox()
+    before = [fn.__name__ for fn in mt.hooks["before"]]
+    assert before == ["track_info", "track_time"]  # base + VERBOSE overlay
+    assert [s.__name__ for s in mt.sinks] == ["terminal"]
+
+
+def test_overlay_piece_surfaces_in_output(capsys):
+    mt = my_toolbox.MyToolbox()
 
     @mt
     def do(name):
@@ -53,13 +59,14 @@ def test_my_toolbox_debug_pipeline_logs_via_terminal(capsys):
 
     assert do("widget") == "processed widget"
     out = capsys.readouterr().out
-    assert "processed widget" in out  # [AFTER] summary line surfaced by terminal sink
-    assert "RUNTIME:" in out  # track_time fired under DEBUG
+    assert "processed widget" in out
+    assert "RUNTIME:" in out  # track_time, contributed by the configs/ overlay
 
 
-def test_my_toolbox_real_pieces_are_wired():
-    mt = my_toolbox.MyToolbox()
-    before_names = [fn.__name__ for fn in mt.hooks["before"]]
-    assert "track_info" in before_names
-    assert "track_time" in before_names  # DEBUG=1
-    assert [s.__name__ for s in mt.sinks] == ["terminal"]
+def test_production_style_dict_only_omits_overlay():
+    # production: hand in the base dict alone (stand-in for API JSON), no files
+    from config import BASE
+
+    prod = my_toolbox.MyToolbox(config_sources=[BASE])
+    before = [fn.__name__ for fn in prod.hooks["before"]]
+    assert before == ["track_info"]  # no track_time: the overlay is never read

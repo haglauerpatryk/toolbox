@@ -1,0 +1,6 @@
+{
+  "service": {
+    "hooks": {"always": ["track_info"]},
+    "sinks": {"always": ["json_lines"]}
+  }
+}

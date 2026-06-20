@@ -1,0 +1,6 @@
+# Overlay merged after the base. Numeric filename prefixes make the directory's
+# sorted merge order explicit (10- before 20-).
+service:
+  sinks:
+    always:
+      - terminal

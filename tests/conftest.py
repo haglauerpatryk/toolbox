@@ -12,7 +12,7 @@ import yaml
 # taken. Core tests ignore them; feature tests reference them by name.
 import examples.toolbox_basic  # noqa: E402,F401
 
-import toolbox.core as core  # noqa: E402
+from toolbox.config import clear_cache  # noqa: E402
 from toolbox.core import ToolBox  # noqa: E402
 from toolbox.registries import hook, rule, sink, wrapper  # noqa: E402
 
@@ -32,13 +32,13 @@ def clean_registries():
 
 
 @pytest.fixture(autouse=True)
-def clear_yaml_cache():
+def clear_config_cache():
     """The config cache is a module global keyed by path; isolate it per test."""
-    core._yaml_cache.clear()
+    clear_cache()
     try:
         yield
     finally:
-        core._yaml_cache.clear()
+        clear_cache()
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def toolbox_factory(tmp_path):
     """Build a real ToolBox from a temp config, wiring named pieces via `always`.
 
     Exercises the genuine __init__ path (config load -> MRO merge -> selector ->
-    wrap pipeline) without touching discovery or the on-disk config.yaml.
+    wrap pipeline) without touching discovery or the demo's on-disk config.
     """
     counter = {"n": 0}
 

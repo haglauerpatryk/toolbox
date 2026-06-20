@@ -1,0 +1,10 @@
+{
+  "service": {
+    "hooks": {
+      "always": ["track_info", "count_calls"]
+    },
+    "sinks": {
+      "always": ["memory"]
+    }
+  }
+}

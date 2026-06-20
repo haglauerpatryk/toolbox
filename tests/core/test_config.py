@@ -1,9 +1,5 @@
-from toolbox.core import (
-    ToolBox,
-    deep_merge_dicts,
-    load_yaml_config,
-    resolve_toolbox_config,
-)
+from toolbox.config import deep_merge_dicts, load_config
+from toolbox.core import ToolBox, resolve_toolbox_config
 
 
 # --- deep_merge_dicts -------------------------------------------------------
@@ -46,21 +42,21 @@ def test_nested_result_is_a_deep_copy():
     assert a == {"d": {"x": [1]}}
 
 
-# --- load_yaml_config -------------------------------------------------------
+# --- load_config ------------------------------------------------------------
 
 
-def test_load_yaml_parses(tmp_path):
+def test_load_config_parses_yaml(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text("a: 1\nb: [x, y]\n")
-    assert load_yaml_config(str(p)) == {"a": 1, "b": ["x", "y"]}
+    assert load_config(str(p)) == {"a": 1, "b": ["x", "y"]}
 
 
-def test_load_yaml_is_cached(tmp_path):
+def test_load_config_is_cached(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text("a: 1")
-    first = load_yaml_config(str(p))
+    first = load_config(str(p))
     p.write_text("a: 2")  # disk changes...
-    second = load_yaml_config(str(p))
+    second = load_config(str(p))
     assert second is first  # ...but the cached object is returned
     assert second == {"a": 1}
 
@@ -68,7 +64,7 @@ def test_load_yaml_is_cached(tmp_path):
 def test_empty_file_yields_empty_dict(tmp_path):
     p = tmp_path / "empty.yaml"
     p.write_text("")
-    assert load_yaml_config(str(p)) == {}
+    assert load_config(str(p)) == {}
 
 
 # --- resolve_toolbox_config (MRO merge) -------------------------------------

@@ -1,34 +1,20 @@
 import functools
-from copy import deepcopy
+import sys
 from pathlib import Path
 
-import yaml
-
+from toolbox.config import (
+    deep_merge_dicts,
+    dedupe as _dedupe,
+    load_config,
+    resolve_sources,
+)
 from toolbox.context import CallContext, _current
 from toolbox.discovery import discover
 from toolbox.registries import hook, sink, wrapper
 from toolbox.selectors import Selector
 
-_yaml_cache = {}
-
-
-def load_yaml_config(path):
-    if path not in _yaml_cache:
-        with open(path, "r") as f:
-            _yaml_cache[path] = yaml.safe_load(f) or {}
-    return _yaml_cache[path]
-
-
-def deep_merge_dicts(a, b):
-    result = deepcopy(a)
-    for k, v in b.items():
-        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
-            result[k] = deep_merge_dicts(result[k], v)
-        elif k in result and isinstance(result[k], list) and isinstance(v, list):
-            result[k] = result[k] + deepcopy(v)
-        else:
-            result[k] = deepcopy(v)
-    return result
+_YELLOW = "\033[33m"
+_RESET = "\033[0m"
 
 
 def resolve_toolbox_config(cls, config_data):
@@ -46,28 +32,58 @@ def resolve_toolbox_config(cls, config_data):
 class ToolBox:
     name = "toolbox"
     config_path = "config.yaml"
+    config_sources = None
     log_directory = "logs"
     log_filename = "toolbox.log"
     root_dir = Path(__file__).resolve().parent.parent
     variables = {}
     features = []
     auto_discover = True
+    dedupe = True
+    warn_on_dedupe = True
 
-    def __init__(self):
+    def __init__(self, *, config_sources=None):
         discover(self.features, auto=self.auto_discover)
 
-        config_data = load_yaml_config(self.config_path)
+        sources = config_sources or self.config_sources or [self.config_path]
+        config_data = resolve_sources(sources)
+        if self.name not in config_data:
+            raise ValueError(
+                f"toolbox '{self.name}' has no matching config section "
+                f"(sources declared: {sorted(config_data)}). Name the toolbox "
+                f"explicitly in its config as a handshake, even if the section is empty."
+            )
         section = resolve_toolbox_config(type(self), config_data)
         selector = Selector(self.variables)
 
         self.hooks = {"before": [], "after": [], "on_error": []}
-        for name in selector.resolve(section.get("hooks", {})):
+        for name in self._resolve_names(selector, section.get("hooks", {}), "hook"):
             entry = hook.get(name)
             for stage in entry.meta.get("stages", ()):
                 self.hooks[stage].append(entry.func)
 
-        self.wrappers = [wrapper.get(n).func for n in selector.resolve(section.get("wrappers", {}))]
-        self.sinks = [sink.get(n).func for n in selector.resolve(section.get("sinks", {}))]
+        self.wrappers = [
+            wrapper.get(n).func
+            for n in self._resolve_names(selector, section.get("wrappers", {}), "wrapper")
+        ]
+        self.sinks = [
+            sink.get(n).func
+            for n in self._resolve_names(selector, section.get("sinks", {}), "sink")
+        ]
+
+    def _resolve_names(self, selector, block, kind):
+        names = selector.resolve(block)
+        if not self.dedupe:
+            return names
+        kept, removed = _dedupe(names)
+        if removed and self.warn_on_dedupe:
+            self._warn_duplicates(kind, removed)
+        return kept
+
+    def _warn_duplicates(self, kind, removed):
+        names = ", ".join(sorted(set(removed)))
+        msg = f"[toolbox] {self.name}: removed duplicate {kind}(s): {names}"
+        print(f"{_YELLOW}{msg}{_RESET}", file=sys.stderr)
 
     @property
     def log_path(self):

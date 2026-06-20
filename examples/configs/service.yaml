@@ -1,0 +1,10 @@
+# A service toolbox, expressed in YAML. Its JSON twin (service.json) is byte-for-
+# byte equivalent in meaning — the framework resolves both to the same dict.
+service:
+  hooks:
+    always:
+      - track_info
+      - count_calls
+  sinks:
+    always:
+      - memory

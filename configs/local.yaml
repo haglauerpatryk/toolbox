@@ -1,0 +1,8 @@
+# Local dev overlay, merged on top of the Python base. It adds a piece behind a
+# plain user variable — the framework has no built-in DEBUG; you choose the flag
+# (here VERBOSE) and gate however you like, in config or with a trivial `if`.
+my_toolbox:
+  hooks:
+    if_var:
+      VERBOSE:
+        - track_time

@@ -21,7 +21,7 @@ Two layers, kept strictly separate:
 ### The four kinds
 
 Every extension point uses the **same** convention: `@<kind>.register("<name>")`, where
-`<name>` is the exact string you reference in `config.yaml`.
+`<name>` is the exact string you reference in your config.
 
 | Kind | Decorator | Signature | What it is |
 |------|-----------|-----------|------------|
@@ -46,11 +46,13 @@ pip install -r requirements.txt   # demo deps (PyYAML, tenacity)
 python3 main.py
 ```
 
-## The three user-facing files
+## The user-facing files
 
+- **`config.py`** — a base config authored as a Python dict (`BASE`); treat it as
+  the production source of truth.
+- **`configs/`** — a directory of YAML files merged on top of the base in dev.
 - **`my_toolbox.py`** — define your toolbox: subclass `ToolBox`, give it a `name`
-  (its YAML section), declare `variables` (e.g. `DEBUG`), and list `features`.
-- **`config.yaml`** — declare which pieces are active and under what conditions.
+  (its config section), set `config_sources`, declare `variables`, list `features`.
 - **`main.py`** — your code; decorate functions with the toolbox.
 
 ## Writing a piece
@@ -72,7 +74,9 @@ unique per kind — a duplicate name raises immediately rather than silently ove
 ## Config grammar
 
 Each section maps 1:1 to a kind (`hooks`, `wrappers`, `sinks`). Inside a section, the
-selector rules decide what is active:
+selector rules decide what is active. `VERBOSE` below is just a name *you* chose — the
+framework has no built-in variables (no special `DEBUG`); a selector reads whatever you
+put in the toolbox's `variables`:
 
 ```yaml
 my_toolbox:
@@ -80,20 +84,59 @@ my_toolbox:
     always:
       - track_info
     if_var:
-      DEBUG:
+      VERBOSE:
         - track_time
   wrappers:
     always:
       - retry
   sinks:
     if_var:
-      DEBUG: [terminal]
+      VERBOSE: [terminal]
     if_not_var:
-      DEBUG: [file]
+      VERBOSE: [file]
 ```
 
-Toolboxes inherit config through the class hierarchy: a subclass's YAML section is
-deep-merged over its parents' (lists extend, dicts merge).
+Toolboxes inherit config through the class hierarchy: a subclass's section is
+deep-merged over its parents' (lists extend, dicts merge). A toolbox **must** name
+its own section in the resolved config — even an empty `my_toolbox:` — or construction
+fails. This handshake confirms a toolbox is pointed at config meant for it, rather than
+silently coming up empty when a section name is wrong or missing.
+
+## Config sources
+
+A toolbox builds its config from `config_sources`, an **ordered list**. Each entry is a
+**dict**, a **file path**, or a **directory**; they are deep-merged left-to-right. Order
+is the *only* precedence rule — arrange the list to decide what overrides what:
+
+```python
+from config import BASE   # a Python dict
+
+class MyToolbox(ToolBox):
+    config_sources = [BASE, "configs/"]   # base, then the yaml dir on top
+    variables = {"VERBOSE": 1}
+```
+
+- **dict** — used as-is. This is the slot for **JSON**: hand in a dict you parsed
+  yourself (e.g. fetched from an API). The framework never reaches for a JSON file —
+  *you* own how it arrives. File paths are still read by extension (`.yaml`/`.yml`/`.json`),
+  so a JSON file works too if that's your case.
+- **file** — deserialized by extension; YAML and JSON resolve to the same shape.
+- **directory** — every `*.yaml`/`*.yml`/`*.json` inside, sorted, merged (files
+  beginning with `_` are skipped).
+
+Dev vs. prod is *your* composition, not a framework mode: list `[BASE, "configs/"]`
+locally; pass `[BASE]` (or your API dict alone) in production. A constructor override —
+`MyToolbox(config_sources=[...])` — is the natural slot for a config assembled at runtime.
+
+On overlap, scalars and dict-keys take the later source; **lists are appended and then
+de-duplicated**. Dedup runs after resolution (so it catches repeats from any origin —
+multiple files, a directory, or class inheritance), keeping the first occurrence and
+printing a yellow warning naming what was dropped. Two toolbox flags control it:
+
+```python
+dedupe = True          # set False to keep duplicates (a piece can then run twice)
+warn_on_dedupe = True  # set False to dedupe silently
+```
 
 ## Error handling
 
@@ -210,11 +253,43 @@ toolbox/                 core — architecture only
   registries.py          the four kind instances (hook/wrapper/sink/rule)
   context.py             CallContext + current-context logging
   selectors.py           always / if_var / if_not_var
-  core.py                ToolBox: config load, MRO merge, wrap() pipeline
+  core.py                ToolBox: source resolution, MRO merge, dedupe, wrap()
   discovery.py           prefix-scan + features-list loading
-examples/toolbox_basic/  reference bundle (instrument, retry, sinks, errors, catch, background)
-config.yaml  my_toolbox.py  main.py   demo wiring
+  config/                config loading, separated by concern
+    yaml.py  json.py     per-format deserializers (text -> dict)
+    loader.py            extension dispatch, source merge, dedupe
+examples/
+  toolbox_basic/         reference bundle: instrument, metrics, sinks,
+                         wrappers (retry/memoize/rate_limit/validate),
+                         rules (if_env/if_equals), errors, catch, background
+  configs/               example configs — service.yaml + service.json (equivalent),
+                         base.py, prod.json, overlays/ (ordered directory merge)
+  scenarios/             production usage: diagnostics, payments, llm_api
+  run_scenarios.py       `python -m examples.run_scenarios`
+config.py  configs/  my_toolbox.py  main.py   demo wiring
 ```
+
+## Production examples
+
+`examples/scenarios/` shows the architecture composed for real use cases — each is a
+toolbox plus config, no core changes:
+
+- **`diagnostics`** — make any function observable for local dev (counts, args, timing,
+  slow-call warnings), gated by a plain `VERBOSE` variable.
+- **`payments`** — an advanced decorator that turns exceptions into business outcomes via
+  `catch` (validation/decline → structured results, network error → re-raised for an
+  idempotent caller), auditing every attempt to a JSONL stream. Deliberately no retry.
+- **`llm_api`** — a flaky API: `[rate_limit, retry, validate]` so a malformed response
+  raises `FormatError`, `retry` re-runs the call, and on persistent breakage the
+  `on_error` lambda yields a safe fallback instead of crashing the request path.
+- **`platform`** — toolbox inheritance: a shared `PlatformBase` (diagnostics) that both a
+  payments and an LLM service derive from, reusing the same processing under inherited
+  wiring. The payments service re-declares a base hook, so its section overlaps the base
+  and you see the dedup warning fire across the class hierarchy.
+
+`examples/configs/` carries the same service config in YAML *and* JSON (they resolve
+identically), a Python base dict, a production JSON payload, and an `overlays/` directory
+demonstrating ordered, de-duplicated source merging.
 
 ## Roadmap
 
