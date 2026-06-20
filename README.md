@@ -211,6 +211,17 @@ unmatched exception propagates untouched. Tuple keys group types
 handler obeys the same return rule as a plain `on_error` — `catch` only *selects*, it
 doesn't change the contract.
 
+### Patterns
+
+The lambda is one expression, but it can call any function, reach the original call's
+arguments via `current_context()`, run a side effect with `or`, and branch — so it covers
+nearly every `try/except` you'd write. `examples/scenarios/error_handling.py` works through
+nine real ones: failover to a backup with the same arguments, degrade to a cached value,
+best-effort passthrough, dead-letter handoff, observe-then-re-raise (`alert(e) or e`),
+conditional re-raise of retryable errors, sanitize-before-propagating (don't leak internals),
+a uniform result envelope, and HTTP-style boundary mapping. The configured `on_error` hooks
+and sinks still fire regardless of what the lambda decides.
+
 ## Dynamic config
 
 A toolbox builds its config once, but `reconfigure(config_sources)` rebuilds it and swaps
@@ -293,7 +304,8 @@ examples/
   configs/               example configs — service.yaml + service.json (equivalent),
                          base.py, prod.json, logging.yaml, overlays/ (ordered merge)
   scenarios/             production usage: diagnostics, payments, llm_api,
-                         platform (inheritance), dynamic (live reconfigure)
+                         platform (inheritance), dynamic (live reconfigure),
+                         error_handling (on_error patterns)
   run_scenarios.py       `python -m examples.run_scenarios`
 config.py  configs/  my_toolbox.py  main.py   demo wiring
 ```
@@ -319,6 +331,9 @@ toolbox plus config, no core changes:
   always-on floor; each push *replaces* the dynamic config wholesale, a bad payload is
   rejected before anything changes, and an in-flight request finishes on the config it
   started with.
+- **`error_handling`** — nine real `try/except` idioms written as one-line `on_error`
+  lambdas: failover, cache fallback, dead-letter, observe-then-re-raise, conditional
+  re-raise, sanitize-and-propagate, result envelopes, and type-based boundary mapping.
 
 `examples/configs/` carries the same service config in YAML *and* JSON (they resolve
 identically), a Python base dict, a production JSON payload, a base logging config for the

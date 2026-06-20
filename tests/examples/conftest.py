@@ -2,11 +2,11 @@ import time
 
 import pytest
 
-from examples.scenarios import llm_api
+from examples.scenarios import error_handling, llm_api
 from examples.toolbox_basic import metrics, sinks, wrappers
 
 # Pieces keep aggregate state in their own modules; reset it around every test.
-_STATEFUL = (metrics, sinks, wrappers, llm_api)
+_STATEFUL = (metrics, sinks, wrappers, llm_api, error_handling)
 
 
 @pytest.fixture(autouse=True)
