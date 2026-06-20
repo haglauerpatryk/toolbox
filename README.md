@@ -1,8 +1,9 @@
 # toolbox
 
 A small, config-driven **function-wrapping architecture**. The core ships with *no*
-behavior of its own — you decorate a function, and a YAML file declaratively decides
-what runs around each call (instrumentation, logging, retries, error handling).
+behavior of its own — you decorate a function, and config (YAML, JSON, or a plain dict)
+declaratively decides what runs around each call (instrumentation, logging, retries,
+error handling).
 
 The behaviors themselves ("lego pieces") live **outside** the core. You install a
 bundle, write your own, or both.
@@ -12,7 +13,7 @@ bundle, write your own, or both.
 Two layers, kept strictly separate:
 
 - **Core (`toolbox/`)** — the architecture. Installable on its own and does nothing
-  until a piece registers. Provides the `ToolBox` engine, the YAML/config machinery,
+  until a piece registers. Provides the `ToolBox` engine, the config machinery,
   the `CallContext`, and the four registries pieces plug into.
 - **Pieces (features)** — the lego bricks. Each is a small function registered under a
   name with one of four decorators. They live in feature bundles (e.g.
@@ -44,6 +45,13 @@ source .venv/bin/activate
 pip install -e .            # installs the core
 pip install -r requirements.txt   # demo deps (PyYAML, tenacity)
 python3 main.py
+```
+
+Run the tests:
+
+```bash
+pip install -e ".[test]"    # pytest + tenacity
+pytest
 ```
 
 ## The user-facing files
@@ -203,6 +211,26 @@ unmatched exception propagates untouched. Tuple keys group types
 handler obeys the same return rule as a plain `on_error` — `catch` only *selects*, it
 doesn't change the contract.
 
+## Dynamic config
+
+A toolbox builds its config once, but `reconfigure(config_sources)` rebuilds it and swaps
+it onto the **live** instance — for config pushed at runtime (e.g. from an admin panel)
+while the app keeps serving:
+
+```python
+app.reconfigure([BASE_LOGGING, admin_payload])   # full replace, not a merge
+```
+
+It is a full replace: you compose the source list yourself (always include your base
+logging floor). The swap is safe by construction:
+
+- **Build-then-swap** — the new config is fully built and validated first; a bad payload
+  (unknown piece, or missing the name handshake) raises *before* anything changes, so the
+  running config stays live.
+- **A call reads its config once**, so a request in flight finishes on the config it
+  started with; the next request sees the new one. The reference swap is atomic (no lock).
+- Config can only re-wire **already-registered** pieces — it can never introduce code.
+
 ## Off-path sinks
 
 Sinks run inline in the wrap pipeline, so a sink doing slow I/O (a file write, a network
@@ -253,7 +281,7 @@ toolbox/                 core — architecture only
   registries.py          the four kind instances (hook/wrapper/sink/rule)
   context.py             CallContext + current-context logging
   selectors.py           always / if_var / if_not_var
-  core.py                ToolBox: source resolution, MRO merge, dedupe, wrap()
+  core.py                ToolBox: source resolution, MRO merge, dedupe, wrap(), reconfigure
   discovery.py           prefix-scan + features-list loading
   config/                config loading, separated by concern
     yaml.py  json.py     per-format deserializers (text -> dict)
@@ -263,8 +291,9 @@ examples/
                          wrappers (retry/memoize/rate_limit/validate),
                          rules (if_env/if_equals), errors, catch, background
   configs/               example configs — service.yaml + service.json (equivalent),
-                         base.py, prod.json, overlays/ (ordered directory merge)
-  scenarios/             production usage: diagnostics, payments, llm_api
+                         base.py, prod.json, logging.yaml, overlays/ (ordered merge)
+  scenarios/             production usage: diagnostics, payments, llm_api,
+                         platform (inheritance), dynamic (live reconfigure)
   run_scenarios.py       `python -m examples.run_scenarios`
 config.py  configs/  my_toolbox.py  main.py   demo wiring
 ```
@@ -286,10 +315,15 @@ toolbox plus config, no core changes:
   payments and an LLM service derive from, reusing the same processing under inherited
   wiring. The payments service re-declares a base hook, so its section overlaps the base
   and you see the dedup warning fire across the class hierarchy.
+- **`dynamic`** — hot-swap a live toolbox's config from an admin API. Base logging is the
+  always-on floor; each push *replaces* the dynamic config wholesale, a bad payload is
+  rejected before anything changes, and an in-flight request finishes on the config it
+  started with.
 
 `examples/configs/` carries the same service config in YAML *and* JSON (they resolve
-identically), a Python base dict, a production JSON payload, and an `overlays/` directory
-demonstrating ordered, de-duplicated source merging.
+identically), a Python base dict, a production JSON payload, a base logging config for the
+`dynamic` example, and an `overlays/` directory demonstrating ordered, de-duplicated
+source merging.
 
 ## Roadmap
 

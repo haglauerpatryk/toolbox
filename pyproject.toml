@@ -8,13 +8,13 @@ version = "0.1.0"
 description = "Config-driven function-wrapping architecture. Bring your own lego pieces."
 requires-python = ">=3.9"
 dependencies = [
-    "PyYAML>=6.0",
+    "PyYAML>=6.0.3",
 ]
 
 [project.optional-dependencies]
 test = [
-    "pytest>=8",
-    "tenacity>=9",
+    "pytest>=9.1.1",
+    "tenacity>=9.1.4",
 ]
 
 [tool.setuptools]

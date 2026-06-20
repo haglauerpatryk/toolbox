@@ -77,6 +77,41 @@ def test_constructor_config_sources_overrides_class_attribute():
     assert before_names(tb) == ["h2"]
 
 
+def test_no_config_at_all_raises_clear_error():
+    cls = type(
+        "NoConfig",
+        (ToolBox,),
+        {"name": "x", "features": [], "auto_discover": False},  # no sources, no path
+    )
+    with pytest.raises(ValueError, match="has no config"):
+        cls()
+
+
+def test_reconfigure_swaps_active_pieces():
+    register_hook("h1")
+    register_hook("h2")
+    tb = make_toolbox_class([section("s_tb", ["h1"])])()
+    assert before_names(tb) == ["h1"]
+    tb.reconfigure([section("s_tb", ["h2"])])
+    assert before_names(tb) == ["h2"]  # full replace, not merge
+
+
+def test_reconfigure_validates_before_swapping():
+    register_hook("h1")
+    tb = make_toolbox_class([section("s_tb", ["h1"])])()
+    with pytest.raises(KeyError):
+        tb.reconfigure([section("s_tb", ["nonexistent"])])
+    assert before_names(tb) == ["h1"]  # build failed -> old config untouched
+
+
+def test_reconfigure_enforces_handshake():
+    register_hook("h1")
+    tb = make_toolbox_class([section("s_tb", ["h1"])])()
+    with pytest.raises(ValueError, match="no matching config section"):
+        tb.reconfigure([{"WRONG": {}}])
+    assert before_names(tb) == ["h1"]
+
+
 def test_missing_section_raises_handshake_error():
     # the config never names the toolbox -> hard fail, not a silent empty config
     cls = make_toolbox_class([{"some_other_toolbox": {"hooks": {"always": ["x"]}}}])

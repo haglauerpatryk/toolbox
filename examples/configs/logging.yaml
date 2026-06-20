@@ -1,0 +1,6 @@
+# Base logging config — the always-on floor. In production this is included in
+# every reconfigure payload so logging can never be dropped by an admin update.
+app:
+  sinks:
+    always:
+      - memory

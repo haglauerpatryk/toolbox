@@ -1,5 +1,6 @@
 import functools
 import sys
+from collections import namedtuple
 from pathlib import Path
 
 from toolbox.config import (
@@ -16,6 +17,9 @@ from toolbox.selectors import Selector
 _YELLOW = "\033[33m"
 _RESET = "\033[0m"
 
+# The built config is held as one immutable unit so it can be swapped atomically.
+_Config = namedtuple("_Config", ["hooks", "wrappers", "sinks"])
+
 
 def resolve_toolbox_config(cls, config_data):
     merged = {}
@@ -31,7 +35,7 @@ def resolve_toolbox_config(cls, config_data):
 
 class ToolBox:
     name = "toolbox"
-    config_path = "config.yaml"
+    config_path = None
     config_sources = None
     log_directory = "logs"
     log_filename = "toolbox.log"
@@ -44,8 +48,33 @@ class ToolBox:
 
     def __init__(self, *, config_sources=None):
         discover(self.features, auto=self.auto_discover)
+        sources = config_sources or self.config_sources
+        if not sources:
+            if not self.config_path:
+                raise ValueError(
+                    f"toolbox '{self.name}' has no config. Set up a config file and point "
+                    f"`config_path` at it, or set `config_sources` (a list of dicts, files, "
+                    f"or directories)."
+                )
+            sources = [self.config_path]
+        self._sources = sources
+        self._config = self._build(sources)
 
-        sources = config_sources or self.config_sources or [self.config_path]
+    def reconfigure(self, config_sources):
+        """Replace the live config with a freshly built one, atomically.
+
+        The new config is fully built and validated first; only on success is the
+        single reference swapped. A bad payload (unknown piece, missing the name
+        handshake) raises here and leaves the running config untouched. A call
+        already in flight finishes on the config it captured; the next call sees
+        the new one. This is a full replace, not a merge — compose the source list
+        (e.g. always include your base logging) however you like.
+        """
+        new_config = self._build(config_sources)
+        self._sources = list(config_sources)
+        self._config = new_config
+
+    def _build(self, sources):
         config_data = resolve_sources(sources)
         if self.name not in config_data:
             raise ValueError(
@@ -56,20 +85,21 @@ class ToolBox:
         section = resolve_toolbox_config(type(self), config_data)
         selector = Selector(self.variables)
 
-        self.hooks = {"before": [], "after": [], "on_error": []}
+        hooks = {"before": [], "after": [], "on_error": []}
         for name in self._resolve_names(selector, section.get("hooks", {}), "hook"):
             entry = hook.get(name)
             for stage in entry.meta.get("stages", ()):
-                self.hooks[stage].append(entry.func)
+                hooks[stage].append(entry.func)
 
-        self.wrappers = [
+        wrappers = [
             wrapper.get(n).func
             for n in self._resolve_names(selector, section.get("wrappers", {}), "wrapper")
         ]
-        self.sinks = [
+        sinks = [
             sink.get(n).func
             for n in self._resolve_names(selector, section.get("sinks", {}), "sink")
         ]
+        return _Config(hooks, wrappers, sinks)
 
     def _resolve_names(self, selector, block, kind):
         names = selector.resolve(block)
@@ -86,17 +116,26 @@ class ToolBox:
         print(f"{_YELLOW}{msg}{_RESET}", file=sys.stderr)
 
     @property
+    def hooks(self):
+        return self._config.hooks
+
+    @property
+    def wrappers(self):
+        return self._config.wrappers
+
+    @property
+    def sinks(self):
+        return self._config.sinks
+
+    @property
     def log_path(self):
         return f"{self.log_directory}/{self.log_filename}"
 
     @property
     def _active(self):
+        c = self._config
         return bool(
-            self.hooks["before"]
-            or self.hooks["after"]
-            or self.hooks["on_error"]
-            or self.wrappers
-            or self.sinks
+            c.hooks["before"] or c.hooks["after"] or c.hooks["on_error"] or c.wrappers or c.sinks
         )
 
     def wrap(self, func, on_error=None):
@@ -105,27 +144,28 @@ class ToolBox:
 
         @functools.wraps(func)
         def wrapped(*args, **kwargs):
+            cfg = self._config  # read once: an in-flight call sees one consistent config
             ctx = CallContext(func=func, args=args, kwargs=kwargs, toolbox=self)
             token = _current.set(ctx)
             try:
                 ctx.stage = "before"
-                for method in self.hooks["before"]:
+                for method in cfg.hooks["before"]:
                     method(ctx)
 
                 inner = func
-                for w in reversed(self.wrappers):
+                for w in reversed(cfg.wrappers):
                     inner = w(inner)
 
                 try:
                     ctx.result = inner(*args, **kwargs)
                     ctx.stage = "after"
-                    for method in self.hooks["after"]:
+                    for method in cfg.hooks["after"]:
                         method(ctx)
                     return ctx.result
                 except Exception as e:
                     ctx.exception = e
                     ctx.stage = "on_error"
-                    for method in self.hooks["on_error"]:
+                    for method in cfg.hooks["on_error"]:
                         method(ctx)
                     if on_error is None:
                         raise
@@ -137,7 +177,7 @@ class ToolBox:
                     ctx.result = outcome
                     return ctx.result
             finally:
-                for emit in self.sinks:
+                for emit in cfg.sinks:
                     emit(ctx)
                 _current.reset(token)
 

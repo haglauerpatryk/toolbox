@@ -3,7 +3,7 @@
     python -m examples.run_scenarios   # from the repo root
 """
 
-from examples.scenarios import diagnostics, llm_api, payments, platform
+from examples.scenarios import diagnostics, dynamic, llm_api, payments, platform
 from examples.toolbox_basic import metrics, sinks
 
 
@@ -22,6 +22,12 @@ def main():
     print("\n== platform (shared diagnostics base, inherited by two services) ==")
     print("payments_svc ->", platform.charge(2500, "4242424242424242"))
     print("llm_svc      ->", platform.ask("inherited diagnostics?"))
+
+    print("\n== dynamic config (admin hot-swap, base logging always kept) ==")
+    print("before push:", [f.__name__ for f in dynamic.app.hooks["before"]] or "(base only)")
+    dynamic.apply_admin_config({"app": {"hooks": {"always": ["count_calls"]}}})
+    print("after push :", [f.__name__ for f in dynamic.app.hooks["before"]])
+    dynamic.apply_admin_config({})  # reset to base for a clean demo state
 
     print("\ncall counts:", metrics.counts())
     print("calls collected by the memory sink:", len(sinks.collected()))
