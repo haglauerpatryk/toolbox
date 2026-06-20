@@ -181,6 +181,7 @@ class ToolBox:
                     emit(ctx)
                 _current.reset(token)
 
+        wrapped.__toolbox__ = self  # set once at decoration; makes the stack introspectable
         return wrapped
 
     def __call__(self, func=None, *, on_error=None):

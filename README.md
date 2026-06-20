@@ -264,6 +264,24 @@ stderr so an off-path failure never surfaces on the request path. The snapshot h
 the worker is the call's `CallContext`; background sinks must not rely on
 `current_context()`, which doesn't cross the thread boundary.
 
+## Introspection
+
+`toolbox/inspect.py` is a read-only CLI for checking complex setups **without running
+anything** — it loads only when invoked, so it adds nothing to a running app (the one
+enabling change is a single `__toolbox__` tag set on each wrapper at decoration, never on
+the call path):
+
+```bash
+python -m toolbox.inspect inspect  examples.scenarios.payments.charge   # the wrap stack
+python -m toolbox.inspect validate examples.scenarios.payments.Payments # build-check a config
+```
+
+`inspect` walks a function's wrap stack (which toolboxes are attached, outermost first,
+with each one's active pieces) and flags any piece active in **more than one layer** — a
+duplicate the per-toolbox dedup can't catch, because stacked toolboxes are independent.
+`validate` builds a toolbox's config (handshake + every referenced piece exists) and exits
+non-zero on a problem — handy in CI or as a pre-flight before an admin `reconfigure`.
+
 ## How pieces are discovered
 
 Three channels, checked at startup:
@@ -294,6 +312,7 @@ toolbox/                 core — architecture only
   selectors.py           always / if_var / if_not_var
   core.py                ToolBox: source resolution, MRO merge, dedupe, wrap(), reconfigure
   discovery.py           prefix-scan + features-list loading
+  inspect.py             read-only introspection CLI (python -m toolbox.inspect)
   config/                config loading, separated by concern
     yaml.py  json.py     per-format deserializers (text -> dict)
     loader.py            extension dispatch, source merge, dedupe
