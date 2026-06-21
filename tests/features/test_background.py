@@ -171,14 +171,14 @@ def test_worker_sees_live_ctx_not_a_snapshot():
 
     def my_sink(c):
         gate.wait(timeout=5)  # worker reads only after the caller mutates
-        seen["buffer"] = list(c.buffer)
+        seen["records"] = [r.msg for r in c.records]
 
     disp.submit(partial(my_sink, ctx))
-    ctx.buffer.append("late")  # caller mutates the same object post-enqueue
+    ctx.log("late")  # caller mutates the same object post-enqueue
     gate.set()
     disp._flush()
 
-    assert seen["buffer"] == ["late"]  # worker observed the live mutation
+    assert seen["records"] == ["late"]  # worker observed the live mutation
 
 
 def test_module_level_submit_uses_global_dispatcher():

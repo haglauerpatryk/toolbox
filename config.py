@@ -4,7 +4,7 @@
 BASE = {
     "my_toolbox": {
         "hooks": {"always": ["track_info"]},
-        "sinks": {"always": ["terminal"]},
+        "sinks": {"always": ["logging"]},
     },
     "error_toolbox": {
         "hooks": {"always": ["handle_problem"]},

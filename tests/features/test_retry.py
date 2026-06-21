@@ -57,7 +57,7 @@ def test_retry_logs_each_failed_attempt_to_context_buffer():
             wrapped()
     finally:
         _current.reset(token)
-    retry_lines = [line for line in ctx.buffer if "[RETRY]" in line]
+    retry_lines = [line for line in ctx.messages if "[RETRY]" in line]
     assert len(retry_lines) == 2  # logged before each of the two re-sleeps
 
 

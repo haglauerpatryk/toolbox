@@ -1,4 +1,5 @@
 import functools
+import logging
 import sys
 from collections import namedtuple
 from pathlib import Path
@@ -17,8 +18,33 @@ from toolbox.selectors import Selector
 _YELLOW = "\033[33m"
 _RESET = "\033[0m"
 
+# Failures inside observability pieces are reported here, never raised onto the
+# call path. Instrumentation must not be able to change what a function does.
+_internal_logger = logging.getLogger("toolbox")
+
 # The built config is held as one immutable unit so it can be swapped atomically.
 _Config = namedtuple("_Config", ["hooks", "wrappers", "sinks"])
+
+
+def _run_piece(piece, ctx, kind):
+    """Run one hook/sink, swallowing and reporting any failure (fail-open).
+
+    A piece is an observer: if it raises, the call's result or exception must be
+    unaffected, and a broken `before` hook must not skip the call any more than a
+    broken `after` hook should be mis-routed into the error path. So every piece
+    invocation is isolated here and its failure is logged to the `toolbox` logger
+    rather than propagated.
+    """
+    try:
+        piece(ctx)
+    except Exception:
+        _internal_logger.exception(
+            "toolbox: %s piece %r failed at stage %r for %r",
+            kind,
+            getattr(piece, "__name__", piece),
+            ctx.stage,
+            getattr(ctx.func, "__name__", ctx.func),
+        )
 
 
 def resolve_toolbox_config(cls, config_data):
@@ -150,7 +176,7 @@ class ToolBox:
             try:
                 ctx.stage = "before"
                 for method in cfg.hooks["before"]:
-                    method(ctx)
+                    _run_piece(method, ctx, "hook")
 
                 inner = func
                 for w in reversed(cfg.wrappers):
@@ -160,13 +186,13 @@ class ToolBox:
                     ctx.result = inner(*args, **kwargs)
                     ctx.stage = "after"
                     for method in cfg.hooks["after"]:
-                        method(ctx)
+                        _run_piece(method, ctx, "hook")
                     return ctx.result
                 except Exception as e:
                     ctx.exception = e
                     ctx.stage = "on_error"
                     for method in cfg.hooks["on_error"]:
-                        method(ctx)
+                        _run_piece(method, ctx, "hook")
                     if on_error is None:
                         raise
                     outcome = on_error(e)
@@ -178,7 +204,7 @@ class ToolBox:
                     return ctx.result
             finally:
                 for emit in cfg.sinks:
-                    emit(ctx)
+                    _run_piece(emit, ctx, "sink")
                 _current.reset(token)
 
         wrapped.__toolbox__ = self  # set once at decoration; makes the stack introspectable

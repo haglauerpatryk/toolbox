@@ -1,5 +1,7 @@
 """End-to-end tests against the real wiring: config.py base + configs/ overlay + bundle."""
 
+import logging
+
 import pytest
 
 import my_toolbox
@@ -47,20 +49,21 @@ def test_base_plus_overlay_wires_pieces():
     mt = my_toolbox.MyToolbox()
     before = [fn.__name__ for fn in mt.hooks["before"]]
     assert before == ["track_info", "track_time"]  # base + VERBOSE overlay
-    assert [s.__name__ for s in mt.sinks] == ["terminal"]
+    assert [s.__name__ for s in mt.sinks] == ["logging_sink"]
 
 
-def test_overlay_piece_surfaces_in_output(capsys):
+def test_overlay_piece_surfaces_in_output(caplog):
     mt = my_toolbox.MyToolbox()
 
     @mt
     def do(name):
         return f"processed {name}"
 
-    assert do("widget") == "processed widget"
-    out = capsys.readouterr().out
-    assert "processed widget" in out
-    assert "RUNTIME:" in out  # track_time, contributed by the configs/ overlay
+    with caplog.at_level(logging.INFO, logger="toolbox"):
+        assert do("widget") == "processed widget"
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("processed widget" in m for m in messages)  # track_info AFTER summary
+    assert any("RUNTIME:" in m for m in messages)  # track_time, from the configs/ overlay
 
 
 def test_production_style_dict_only_omits_overlay():

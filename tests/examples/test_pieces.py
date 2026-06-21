@@ -1,4 +1,5 @@
 import json
+import logging
 from contextlib import contextmanager
 from time import perf_counter
 
@@ -39,40 +40,41 @@ def test_count_calls_increments_per_func():
     c = ctx_for(a)
     metrics.count_calls(c)
     assert metrics.counts()["a"] == 2
-    assert any("call #2" in line for line in c.buffer)
+    assert any("call #2" in line for line in c.messages)
 
 
 def test_capture_args_logs_args_and_kwargs():
     c = ctx_for(args=(1, 2), kwargs={"k": 3})
     metrics.capture_args(c)
-    assert any("[ARGS]" in line and "k" in line for line in c.buffer)
+    assert any("[ARGS]" in line and "k" in line for line in c.messages)
 
 
 def test_slow_warning_fires_over_threshold():
     c = ctx_for(toolbox=FakeToolbox(SLOW_MS=10))
     c.scratch["start"] = perf_counter() - 1.0  # ~1000ms ago
     metrics.slow_warning(c)
-    assert any("[SLOW]" in line for line in c.buffer)
+    assert any("[SLOW]" in line for line in c.messages)
+    assert c.records[-1].level == logging.WARNING
 
 
 def test_slow_warning_silent_under_threshold():
     c = ctx_for(toolbox=FakeToolbox(SLOW_MS=100000))
     c.scratch["start"] = perf_counter()
     metrics.slow_warning(c)
-    assert c.buffer == []
+    assert c.records == []
 
 
 def test_slow_warning_noop_without_start():
     c = ctx_for(toolbox=FakeToolbox(SLOW_MS=1))
     metrics.slow_warning(c)
-    assert c.buffer == []
+    assert c.records == []
 
 
 def test_slow_warning_default_threshold_without_variables():
     c = ctx_for(toolbox=None)  # no variables -> default 1000ms, fast -> silent
     c.scratch["start"] = perf_counter()
     metrics.slow_warning(c)
-    assert c.buffer == []
+    assert c.records == []
 
 
 # --- sinks ------------------------------------------------------------------
@@ -81,10 +83,14 @@ def test_slow_warning_default_threshold_without_variables():
 def test_memory_records_structured_entry():
     c = ctx_for()
     c.result = "r"
-    c.buffer.append("x")
+    c.log("x")
     sinks.memory(c)
     rec = sinks.collected()[0]
-    assert rec == {"func": "<lambda>", "lines": ["x"], "result": "r", "exception": None}
+    assert rec["func"] == "<lambda>"
+    assert rec["lines"] == ["x"]
+    assert rec["result"] == "r"
+    assert rec["exception"] is None
+    assert [r.msg for r in rec["records"]] == ["x"]
 
 
 def test_counter_counts_emissions():
@@ -96,12 +102,12 @@ def test_counter_counts_emissions():
 def test_json_lines_writes_success_record(tmp_path):
     c = ctx_for(toolbox=FakeToolbox(log_directory=str(tmp_path)))
     c.result = {"a": 1}
-    c.buffer.append("log1")
+    c.log("log1")
     sinks.json_lines(c)
     rec = json.loads((tmp_path / "events.jsonl").read_text().strip())
     assert rec["ok"] is True
     assert rec["result"] == {"a": 1}
-    assert rec["log"] == ["log1"]
+    assert rec["log"] == [{"level": "INFO", "msg": "log1", "fields": {}}]
     assert rec["error"] is None
 
 

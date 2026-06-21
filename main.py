@@ -1,7 +1,12 @@
+import logging
 import time
 
 from examples.toolbox_basic import catch
 from my_toolbox import error_toolbox
+
+# The host owns logging configuration — the toolbox only emits to named loggers.
+# Here we send everything to the console so the demo's records are visible.
+logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 
 
 @error_toolbox

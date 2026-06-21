@@ -15,7 +15,7 @@ def test_track_info_before_sets_path_and_logs():
     ctx.stage = "before"
     hook.get("track_info").func(ctx)
     assert ctx.scratch["path"] == "/fake/path/example.txt"
-    assert any("[BEFORE]" in line for line in ctx.buffer)
+    assert any("[BEFORE]" in line for line in ctx.messages)
 
 
 def test_track_info_after_summarizes_result():
@@ -25,7 +25,7 @@ def test_track_info_after_summarizes_result():
     ctx.result = "RESULT"
     ctx.stage = "after"
     hook.get("track_info").func(ctx)
-    assert any("[AFTER]" in line and "RESULT" in line for line in ctx.buffer)
+    assert any("[AFTER]" in line and "RESULT" in line for line in ctx.messages)
 
 
 def test_track_time_registered_for_both_stages():
@@ -40,11 +40,11 @@ def test_track_time_records_start_then_logs_runtime():
 
     ctx.stage = "after"
     hook.get("track_time").func(ctx)
-    assert any("RUNTIME:" in line for line in ctx.buffer)
+    assert any("RUNTIME:" in line for line in ctx.messages)
 
 
 def test_track_time_after_without_start_does_not_crash():
     ctx = make_ctx()
     ctx.stage = "after"  # no preceding "before"
     hook.get("track_time").func(ctx)
-    assert any("RUNTIME:" in line for line in ctx.buffer)
+    assert any("RUNTIME:" in line for line in ctx.messages)

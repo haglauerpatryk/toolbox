@@ -5,7 +5,7 @@ behavior of its own — you decorate a function, and config (YAML, JSON, or a pl
 declaratively decides what runs around each call (instrumentation, logging, retries,
 error handling).
 
-The behaviors themselves ("lego pieces") live **outside** the core. You install a
+The behaviors lcm xmllc lxmc xml mlxc cml xcml cxkspol ("lego pieces") live **outside** the core. You install a
 bundle, write your own, or both.
 
 ## Concepts
@@ -28,14 +28,15 @@ Every extension point uses the **same** convention: `@<kind>.register("<name>")`
 |------|-----------|-----------|------------|
 | hook | `@hook.register("n", stages=("before","after","on_error"))` | `(ctx)` | observer that runs at lifecycle points |
 | wrapper | `@wrapper.register("n")` | `(func) -> func` | middleware that wraps the call (can alter control flow) |
-| sink | `@sink.register("n")` | `(ctx)` | where buffered output goes |
+| sink | `@sink.register("n")` | `(ctx)` | where each call's log records go (the default emits to stdlib `logging`) |
 | rule | `@rule.register("n")` | `(variables, payload) -> [names]` | a config selector (the core ships `always`/`if_var`/`if_not_var`) |
 
 Hooks and sinks receive a single **`CallContext`** carrying everything about the call:
 `func`, `args`, `kwargs`, `stage`, `result`, `exception`, a `scratch` dict for passing
-state between stages, a per-call `buffer`, and `toolbox` (the owning instance). Wrappers
-run *inside* the call and log via the module-level `log()`, which finds the current
-context automatically.
+state between stages, a per-call list of structured log `records`, and `toolbox` (the
+owning instance). Wrappers run *inside* the call and log via the module-level `log()`,
+which finds the current context automatically. See [Logging](#logging) for the record
+model and the standard-library backend.
 
 ## Setup
 
@@ -79,6 +80,54 @@ def track_time(ctx: CallContext):
 Importing the module that contains this is all it takes to register it. Names are
 unique per kind — a duplicate name raises immediately rather than silently overriding.
 
+## Logging
+
+Logging is **integrated, not reinvented.** A piece emits with `log()` (module-level, finds
+the current call) or `ctx.log()` — both take a level and arbitrary structured fields:
+
+```python
+from toolbox import log
+
+log("started")                                  # INFO by default
+log.warning("slow upstream", latency_ms=812)    # level + structured fields
+log.error("charge failed", order_id=order.id)
+```
+
+Each call accumulates these as structured `LogRecord`s (level, message, fields, and a
+log-time timestamp) on its `CallContext.records`. They are **not** emitted as they happen —
+they're buffered and flushed once, at the end of the call, by a **sink**. That is the
+"always emit" point: sinks run in a `finally`, so every record produced on any path (success,
+error, or recovery) is flushed. A log emitted *outside* any wrapped call doesn't vanish — it
+falls back to the `toolbox` logger.
+
+### The logging sink — the backend seam
+
+The default sink, `logging`, hands each record to a named `logging.Logger`
+(`toolbox.<toolbox>.<function>`), passing the structured fields and call context through
+`extra=` and preserving the log-time timestamp. That is the whole integration: **levels,
+destinations, formatting, and routing are the standard library's job** — you configure them
+with ordinary handlers/formatters (or Django's `LOGGING`). Dev-console vs. JSONL production
+output is a *formatter* choice on a handler, not framework code:
+
+```python
+import logging
+logging.basicConfig(level=logging.INFO)   # the host owns logging configuration
+```
+
+Because the backend lives behind a sink, it is swappable: to move to structlog (or anything
+else) you write one sink and name it in config — the core never changes. The bundle also
+ships `terminal`/`file`/`json_lines` as convenience sinks that render records directly, and
+`logging_background` to run emission off the request path (see [Off-path sinks](#off-path-sinks)).
+
+### Instrumentation can't break your call
+
+Every hook and sink runs **fail-open**: if a piece raises, the failure is caught, reported
+to the `toolbox` logger, and the call's result or exception is left untouched. A broken
+`before` hook won't skip the call, a broken `after` hook won't be mis-routed into the error
+path, and a sink whose I/O fails won't mask your result. Observability can never change what
+your function does — only wrappers (deliberately *inside* the call) and your `on_error`
+lambda affect control flow.
+
 ## Config grammar
 
 Each section maps 1:1 to a kind (`hooks`, `wrappers`, `sinks`). Inside a section, the
@@ -98,10 +147,10 @@ my_toolbox:
     always:
       - retry
   sinks:
+    always:
+      - logging                # emit through stdlib logging on every call
     if_var:
-      VERBOSE: [terminal]
-    if_not_var:
-      VERBOSE: [file]
+      VERBOSE: [terminal]      # also echo a rendered block to the console in dev
 ```
 
 Toolboxes inherit config through the class hierarchy: a subclass's section is
@@ -251,12 +300,13 @@ immediately:
 
 ```python
 from examples.toolbox_basic import background
-from examples.toolbox_basic.sinks import file
+from examples.toolbox_basic.sinks import logging_sink
 
-sink.register("file_background")(background(file))   # the bundle already registers this one
+sink.register("logging_background")(background(logging_sink))   # the bundle already registers this one
 ```
 
-Then wire `file_background` instead of `file` in config. The engine is unchanged and stays
+Then wire `logging_background` instead of `logging` in config (the bundle also ships
+`file_background` for the file sink). The engine is unchanged and stays
 synchronous — only the chosen sink runs off-path; the caller pays just the enqueue cost.
 The worker uses a **bounded queue** (drops under sustained overload rather than growing
 memory or blocking the caller), flushes on interpreter exit, and swallows send failures to
@@ -308,7 +358,7 @@ Set `auto_discover = False` on your toolbox to opt out of the prefix-scan.
 toolbox/                 core — architecture only
   registry.py            the one Registry primitive
   registries.py          the four kind instances (hook/wrapper/sink/rule)
-  context.py             CallContext + current-context logging
+  context.py             CallContext + structured LogRecord + current-context logging
   selectors.py           always / if_var / if_not_var
   core.py                ToolBox: source resolution, MRO merge, dedupe, wrap(), reconfigure
   discovery.py           prefix-scan + features-list loading
@@ -317,7 +367,8 @@ toolbox/                 core — architecture only
     yaml.py  json.py     per-format deserializers (text -> dict)
     loader.py            extension dispatch, source merge, dedupe
 examples/
-  toolbox_basic/         reference bundle: instrument, metrics, sinks,
+  toolbox_basic/         reference bundle: instrument, metrics,
+                         sinks (logging backend seam + terminal/file/json_lines),
                          wrappers (retry/memoize/rate_limit/validate),
                          rules (if_env/if_equals), errors, catch, background
   configs/               example configs — service.yaml + service.json (equivalent),

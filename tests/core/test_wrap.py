@@ -278,6 +278,96 @@ def test_ctx_exception_is_set_for_sinks_on_error(toolbox_factory):
     assert isinstance(seen[0], KeyError)
 
 
+# --- piece isolation (fail-open hardening) ----------------------------------
+
+
+def test_broken_before_hook_does_not_skip_the_call(toolbox_factory):
+    ran = []
+    hook.register("boom_before", stages=("before",))(
+        lambda ctx: (_ for _ in ()).throw(RuntimeError("hook bug"))
+    )
+    tb = toolbox_factory(hooks=["boom_before"])
+
+    @tb
+    def f():
+        ran.append(True)
+        return 42
+
+    assert f() == 42  # the call still runs and returns normally
+    assert ran == [True]
+
+
+def test_broken_after_hook_is_not_misrouted_to_error_path(toolbox_factory):
+    errors_seen = []
+    hook.register("boom_after", stages=("after",))(
+        lambda ctx: (_ for _ in ()).throw(RuntimeError("hook bug"))
+    )
+    hook.register("watch_error", stages=("on_error",))(
+        lambda ctx: errors_seen.append(ctx.exception)
+    )
+    tb = toolbox_factory(hooks=["boom_after", "watch_error"])
+
+    @tb
+    def f():
+        return "ok"
+
+    assert f() == "ok"  # success stays success despite the after-hook failure
+    assert errors_seen == []  # on_error never fired
+
+
+def test_broken_sink_does_not_mask_result(toolbox_factory):
+    sink.register("boom_sink")(lambda ctx: (_ for _ in ()).throw(RuntimeError("sink bug")))
+    tb = toolbox_factory(sinks=["boom_sink"])
+
+    @tb
+    def f():
+        return "result"
+
+    assert f() == "result"  # emission failure never surfaces on the call path
+
+
+def test_broken_sink_does_not_mask_exception(toolbox_factory):
+    sink.register("boom_sink2")(lambda ctx: (_ for _ in ()).throw(RuntimeError("sink bug")))
+    tb = toolbox_factory(sinks=["boom_sink2"])
+
+    @tb
+    def f():
+        raise ValueError("real error")
+
+    with pytest.raises(ValueError, match="real error"):  # original error preserved
+        f()
+
+
+def test_one_broken_piece_does_not_stop_the_others(toolbox_factory):
+    hits = []
+    sink.register("s_good_a")(lambda ctx: hits.append("a"))
+    sink.register("s_bad")(lambda ctx: (_ for _ in ()).throw(RuntimeError("x")))
+    sink.register("s_good_b")(lambda ctx: hits.append("b"))
+    tb = toolbox_factory(sinks=["s_good_a", "s_bad", "s_good_b"])
+
+    @tb
+    def f():
+        return 1
+
+    f()
+    assert hits == ["a", "b"]  # the failure between them is isolated
+
+
+def test_piece_failure_is_reported_to_toolbox_logger(toolbox_factory, caplog):
+    import logging
+
+    sink.register("boom_logged")(lambda ctx: (_ for _ in ()).throw(RuntimeError("kaboom")))
+    tb = toolbox_factory(sinks=["boom_logged"])
+
+    @tb
+    def f():
+        return 1
+
+    with caplog.at_level(logging.ERROR, logger="toolbox"):
+        f()
+    assert any("kaboom" in r.getMessage() or r.exc_info for r in caplog.records)
+
+
 # --- contextvar lifecycle ---------------------------------------------------
 
 

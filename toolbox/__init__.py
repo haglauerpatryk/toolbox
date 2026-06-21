@@ -1,6 +1,6 @@
 from toolbox.registry import Registry
 from toolbox.registries import hook, wrapper, sink, rule
-from toolbox.context import CallContext, log, current_context
+from toolbox.context import CallContext, LogRecord, log, current_context
 from toolbox.core import ToolBox
 
 __all__ = [
@@ -10,6 +10,7 @@ __all__ = [
     "sink",
     "rule",
     "CallContext",
+    "LogRecord",
     "log",
     "current_context",
     "ToolBox",

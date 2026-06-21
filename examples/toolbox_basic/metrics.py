@@ -1,3 +1,4 @@
+import logging
 from time import perf_counter
 
 from toolbox import hook
@@ -35,4 +36,7 @@ def slow_warning(ctx):
     elapsed_ms = (perf_counter() - start) * 1000
     threshold = (getattr(ctx.toolbox, "variables", None) or {}).get("SLOW_MS", 1000)
     if elapsed_ms > threshold:
-        ctx.log(f"[SLOW] {ctx.func.__name__} took {elapsed_ms:.1f}ms (> {threshold}ms)")
+        ctx.log(
+            f"[SLOW] {ctx.func.__name__} took {elapsed_ms:.1f}ms (> {threshold}ms)",
+            level=logging.WARNING,
+        )
