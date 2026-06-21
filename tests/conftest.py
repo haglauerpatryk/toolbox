@@ -9,7 +9,8 @@ import pytest
 import yaml
 
 # Register the reference bundle's pieces once, before any per-test snapshot is
-# taken. Core tests ignore them; feature tests reference them by name.
+# taken. tests/core ignores them; tests/bundle and tests/scenarios reference
+# them by name.
 import examples.toolbox_basic  # noqa: E402,F401
 
 from toolbox.config import clear_cache  # noqa: E402

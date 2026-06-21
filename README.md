@@ -5,8 +5,11 @@ behavior of its own — you decorate a function, and config (YAML, JSON, or a pl
 declaratively decides what runs around each call (instrumentation, logging, retries,
 error handling).
 
-The behaviors lcm xmllc lxmc xml mlxc cml xcml cxkspol ("lego pieces") live **outside** the core. You install a
+The behaviors themselves ("lego pieces") live **outside** the core. You install a
 bundle, write your own, or both.
+
+> For the mental model — the layers, the design principles, and a cheat sheet for **what
+> belongs where** (source and tests) — see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Concepts
 
