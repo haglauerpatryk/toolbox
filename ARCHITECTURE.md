@@ -15,7 +15,7 @@ The direction to hold. Usage details live in the [README](README.md).
 - **sink** `(ctx)` — where a call's records go. Default implementation emits to stdlib `logging`. No control flow.
 - **rule** `(variables, payload)->[names]` — a config selector.
 
-## Principles (the invariants)
+## Principles and conventions (the invariants)
 
 1. **Tiny core.** Behavior goes in pieces, never in `toolbox/`.
 2. **Config selects code, never introduces it.** It can only name registered pieces — so `reconfigure()` can re-wire a live app but can't smuggle in code.
