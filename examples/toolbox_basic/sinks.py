@@ -2,28 +2,34 @@ import inspect
 import json
 import logging
 import os
+import threading
 from pathlib import Path
 
 from toolbox import sink
 
 from .background import background
 
-# Collector/counter state lives here, not in ctx.
+# Collector/counter state lives here, not in ctx. Pieces run on whatever threads
+# the host uses, so this shared state is guarded by a lock.
 _collected = []
 _emit_count = {"n": 0}
+_lock = threading.Lock()
 
 
 def reset():
-    _collected.clear()
-    _emit_count["n"] = 0
+    with _lock:
+        _collected.clear()
+        _emit_count["n"] = 0
 
 
 def collected():
-    return list(_collected)
+    with _lock:
+        return list(_collected)
 
 
 def emit_count():
-    return _emit_count["n"]
+    with _lock:
+        return _emit_count["n"]
 
 
 # --- the logging seam: the default, stdlib-backed emitter --------------------
@@ -99,20 +105,21 @@ sink.register("file_background")(background(file))
 @sink.register("memory")
 def memory(ctx):
     # An in-memory collector: a real aggregation sink and a clean test affordance.
-    _collected.append(
-        {
-            "func": _unwrap(ctx.func).__name__,
-            "lines": list(ctx.messages),
-            "records": list(ctx.records),
-            "result": ctx.result,
-            "exception": ctx.exception,
-        }
-    )
+    entry = {
+        "func": _unwrap(ctx.func).__name__,
+        "lines": list(ctx.messages),
+        "records": list(ctx.records),
+        "result": ctx.result,
+        "exception": ctx.exception,
+    }
+    with _lock:
+        _collected.append(entry)
 
 
 @sink.register("counter")
 def counter(ctx):
-    _emit_count["n"] += 1
+    with _lock:
+        _emit_count["n"] += 1
 
 
 @sink.register("json_lines")

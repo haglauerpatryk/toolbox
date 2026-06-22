@@ -203,9 +203,15 @@ class ToolBox:
                     ctx.result = outcome
                     return ctx.result
             finally:
-                for emit in cfg.sinks:
-                    _run_piece(emit, ctx, "sink")
-                _current.reset(token)
+                # Reset the context token unconditionally: a sink raising a
+                # BaseException (KeyboardInterrupt/SystemExit/CancelledError —
+                # which _run_piece deliberately does not catch) must not leak a
+                # stale CallContext into a reused worker thread/task.
+                try:
+                    for emit in cfg.sinks:
+                        _run_piece(emit, ctx, "sink")
+                finally:
+                    _current.reset(token)
 
         wrapped.__toolbox__ = self  # set once at decoration; makes the stack introspectable
         return wrapped

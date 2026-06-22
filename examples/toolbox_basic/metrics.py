@@ -1,25 +1,32 @@
 import logging
+import threading
 from time import perf_counter
 
 from toolbox import hook
 
 # Aggregate state lives in this module, never in ctx (ctx is per-call scratch).
+# Pieces run on whatever threads the host uses, so it is guarded by a lock.
 _call_counts = {}
+_lock = threading.Lock()
 
 
 def reset():
-    _call_counts.clear()
+    with _lock:
+        _call_counts.clear()
 
 
 def counts():
-    return dict(_call_counts)
+    with _lock:
+        return dict(_call_counts)
 
 
 @hook.register("count_calls", stages=("before",))
 def count_calls(ctx):
     name = ctx.func.__name__
-    _call_counts[name] = _call_counts.get(name, 0) + 1
-    ctx.log(f"[COUNT] {name} call #{_call_counts[name]}")
+    with _lock:
+        _call_counts[name] = _call_counts.get(name, 0) + 1
+        count = _call_counts[name]
+    ctx.log(f"[COUNT] {name} call #{count}")
 
 
 @hook.register("capture_args", stages=("before",))

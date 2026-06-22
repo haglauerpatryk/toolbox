@@ -400,6 +400,25 @@ def test_context_reset_even_after_exception(toolbox_factory):
     assert current_context() is None
 
 
+def test_sink_raising_baseexception_still_resets_context(toolbox_factory):
+    # _run_piece deliberately does not catch BaseException (KeyboardInterrupt etc.
+    # should propagate), but the context token must still reset so a reused worker
+    # thread/task does not inherit a stale CallContext.
+    def boom(ctx):
+        raise KeyboardInterrupt("from sink")
+
+    sink.register("boom_base")(boom)
+    tb = toolbox_factory(sinks=["boom_base"])
+
+    @tb
+    def f():
+        return 1
+
+    with pytest.raises(KeyboardInterrupt):
+        f()
+    assert current_context() is None
+
+
 # --- decorator surface ------------------------------------------------------
 
 

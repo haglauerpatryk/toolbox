@@ -1,4 +1,5 @@
 import functools
+import threading
 
 from tenacity import (
     RetryCallState,
@@ -19,14 +20,17 @@ class RateLimitExceeded(Exception):
     """Raised by `rate_limit` when a function exceeds its allowance."""
 
 
-# memoize cache and rate-limit counters live here, not in ctx.
+# memoize cache and rate-limit counters live here, not in ctx. Pieces run on
+# whatever threads the host uses, so this shared state is guarded by a lock.
 _memo = {}
 _rate = {}
+_lock = threading.Lock()
 
 
 def reset():
-    _memo.clear()
-    _rate.clear()
+    with _lock:
+        _memo.clear()
+        _rate.clear()
 
 
 @wrapper.register("retry")
@@ -49,11 +53,16 @@ def memoize(func):
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
         key = (func.__name__, args, tuple(sorted(kwargs.items())))
-        if key in _memo:
-            log("[MEMO] hit")
-            return _memo[key]
+        with _lock:
+            if key in _memo:
+                log("[MEMO] hit")
+                return _memo[key]
+        # Compute outside the lock so a slow call doesn't serialize every caller
+        # (and can't deadlock if it re-enters memoize). Concurrent misses on the
+        # same key may compute more than once; last writer wins — a benign race.
         result = func(*args, **kwargs)
-        _memo[key] = result
+        with _lock:
+            _memo[key] = result
         log("[MEMO] store")
         return result
 
@@ -66,8 +75,10 @@ def rate_limit(func):
     def wrapped(*args, **kwargs):
         limit = _variables().get("RATE_LIMIT", 60)
         name = func.__name__
-        _rate[name] = _rate.get(name, 0) + 1
-        if _rate[name] > limit:
+        with _lock:
+            _rate[name] = _rate.get(name, 0) + 1
+            count = _rate[name]
+        if count > limit:
             raise RateLimitExceeded(f"{name} exceeded {limit} calls")
         return func(*args, **kwargs)
 

@@ -17,7 +17,9 @@ class _Dispatcher:
         try:
             self._queue.put_nowait(job)
         except queue.Full:
-            self.dropped += 1
+            # Multiple producer threads can drop concurrently; guard the counter.
+            with self._lock:
+                self.dropped += 1
 
     def _ensure_worker(self):
         if self._thread is not None:

@@ -20,7 +20,7 @@ The direction to hold. Usage details live in the [README](README.md).
 1. **Tiny core.** Behavior goes in pieces, never in `toolbox/`.
 2. **Config selects code, never introduces it.** It can only name registered pieces — so `reconfigure()` can re-wire a live app but can't smuggle in code.
 3. **`on_error` lambda is the *sole* function-level escape hatch.** Error policy is userland, passed at decoration — never config.
-4. **Never pollute `ctx`.** Per-call scratch only; aggregate state lives in the piece's module.
+4. **Never pollute `ctx`.** Per-call scratch only; aggregate state lives in the piece's module. **Corollary — that state must be concurrency-safe.** Pieces run on whatever threads the host uses (e.g. a threaded WSGI worker pool); `ctx` is per-call and needs no guarding, but module-level aggregate state does. Guard read-modify-write on it with a `threading.Lock` (or an atomic structure), and do slow work — the wrapped call itself — *outside* the lock.
 5. **Instrumentation can't change outcomes.** Hooks/sinks are fail-open (caught, reported, ignored). Only wrappers + `on_error` alter control flow.
 6. **Logging is integrated, not reinvented.** Pieces emit leveled/structured records; the `logging` sink hands them to stdlib; the host owns handlers/formats. Backend swappable by writing one sink.
 7. **A call reads its config once.** In-flight calls finish on their config; the next sees the swap — lock-free `reconfigure()`.

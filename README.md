@@ -235,6 +235,15 @@ the exception is how you raise from one. For anything beyond a one-liner, point 
 lambda at a normal function (`lambda e: handle(e)`); the same return rule applies to
 whatever that function hands back.
 
+The return rule is about exceptions you *choose*. A policy can also raise simply because
+something it **calls** raised — and that exception propagates, chained to the original as
+its context (`backup failure … during handling of primary failure`). This is deliberate:
+it is how a failover handler surfaces a backup's failure (`lambda e: call_backup(...)` —
+if the backup also fails, the caller sees *that* error). So: to translate to a *chosen*
+exception, **return** it (cleanly chained via `from e`); to let a downstream failure
+propagate, just let it raise. The framework can't tell a deliberate downstream raise from
+a bug in your policy, so keep policies total and side-effect-light.
+
 Logging is unaffected: the configured `on_error` hooks and sinks still fire on every
 exception regardless of what the lambda decides. The lambda may read the call's
 `CallContext` via `current_context()`, but should never write per-function state into it.
@@ -293,6 +302,10 @@ logging floor). The swap is safe by construction:
 - **A call reads its config once**, so a request in flight finishes on the config it
   started with; the next request sees the new one. The reference swap is atomic (no lock).
 - Config can only re-wire **already-registered** pieces — it can never introduce code.
+- **File sources are read once.** A file or directory path is deserialized from disk the
+  first time it's loaded and then cached for the life of the process; a live `reconfigure`
+  therefore picks up new content only from **dict** payloads (e.g. JSON from your admin
+  API), not from edits to a file already read at startup. Pass runtime config as a dict.
 
 ## Off-path sinks
 
