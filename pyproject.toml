@@ -18,7 +18,7 @@ test = [
 ]
 
 [tool.setuptools]
-packages = ["toolbox"]
+packages = ["toolbox", "ping"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
